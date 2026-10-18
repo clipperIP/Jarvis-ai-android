@@ -20,6 +20,7 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.text.InputType
+import android.text.Html
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -32,6 +33,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -319,6 +321,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         recognizer?.startListening(intent)
     }
+
+
+    private fun needsLiveSearch(query: String): Boolean {
+        val q = query.lowercase(Locale.ROOT)
+        val triggers = listOf("latest", "current", "right now", "today", "tonight", "this week", "breaking", "news", "weather", "forecast", "score", "scores", "standings", "schedule", "results", "price", "stock", "exchange rate", "recent", "2026", "2025", "who won", "what happened", "updated", "up to date")
+        return triggers.any { q.contains(it) }
+    }
+
+    private fun searchWeb(query: String): String {
+        var connection: HttpURLConnection? = null
+        return try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            connection = (URL("https://html.duckduckgo.com/html/?q=$encoded").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 3500
+                readTimeout = 4500
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Android 15; Mobile) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36")
+            }
+            if (connection.responseCode !in 200..299) return ""
+            val html = connection.inputStream.bufferedReader().use { it.readText() }.take(500000)
+            val titlePattern = Regex("<a[^>]*class=\"result__a\"[^>]*>(.*?)</a>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            val snippetPattern = Regex("<(?:a|div)[^>]*class=\"[^\"]*result__snippet[^\"]*\"[^>]*>(.*?)</(?:a|div)>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            val titles = titlePattern.findAll(html).map { cleanSearchText(it.groupValues[1]) }.filter { it.isNotBlank() }.take(5).toList()
+            val snippets = snippetPattern.findAll(html).map { cleanSearchText(it.groupValues[1]) }.filter { it.isNotBlank() }.take(5).toList()
+            titles.indices.joinToString("\n") { i -> "${i + 1}. ${titles[i]}${if (snippets.getOrNull(i).orEmpty().isNotBlank()) ": ${snippets[i]}" else ""}" }
+        } catch (_: Exception) { "" } finally { connection?.disconnect() }
+    }
+
+    private fun cleanSearchText(raw: String): String = Html.fromHtml(raw.replace(Regex("<[^>]+>"), " "), Html.FROM_HTML_MODE_LEGACY).toString().replace(Regex("\\s+"), " ").trim()
 
     private fun handleContactCommand(message: String): String? {
         val command = message.trim()
