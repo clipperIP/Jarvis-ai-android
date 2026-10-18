@@ -5,6 +5,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.ContactsContract
 import android.graphics.Color
 import android.media.MediaPlayer
 import android.os.Bundle
@@ -47,6 +49,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var memoryView: TextView
     private val prefs by lazy { getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE) }
     private val requestAudio = 42
+    private val requestContacts = 43
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -287,7 +290,75 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         recognizer?.startListening(intent)
     }
 
+    private fun handleContactCommand(message: String): String? {
+        val command = message.trim()
+            .replace(Regex("(?i)^\\s*(?:hey\\s+)?jarvis[,:\\s]*"), "")
+            .trim()
+        val callMatch = Regex("(?i)^(?:please\\s+)?call\\s+(.+?)\\s*$").find(command)
+        val textMatch = Regex("(?i)^(?:text|message)\\s+(.+?)\\s+(?:that|saying)\\s+(.+)$").find(command)
+        val lookupMatch = Regex("(?i)^(?:find|look up|lookup|show(?: me)?|what(?:'s| is))\\s+(.+?)\\s+(?:phone number|number|contact)$").find(command)
+        if (callMatch == null && textMatch == null && lookupMatch == null) return null
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), requestContacts)
+            return "I need permission to read your contacts. Allow Contacts access, then repeat your command."
+        }
+        val rawName = when {
+            callMatch != null -> callMatch.groupValues[1]
+            textMatch != null -> textMatch.groupValues[1]
+            else -> lookupMatch!!.groupValues[1]
+        }.trim().removeSuffix("'s").removeSuffix("’s").trim()
+        if (rawName.isBlank()) return "Tell me the contact's name, Fynn."
+        val matches = findContactMatches(rawName)
+        if (matches.isEmpty()) return "I couldn't find a contact matching $rawName."
+        if (matches.size > 1) {
+            val names = matches.take(4).joinToString(", ") { it.first }
+            return "I found more than one match: $names. Please say the person's full name."
+        }
+        val (name, number) = matches.first()
+        return try {
+            when {
+                callMatch != null -> {
+                    startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)))
+                    "Opening the phone dialer for $name. Check the number and tap Call when you're ready."
+                }
+                textMatch != null -> {
+                    val body = textMatch.groupValues[2].trim()
+                    if (body.isBlank()) return "What message would you like me to prepare for $name?"
+                    val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number"))
+                        .putExtra("sms_body", body)
+                    startActivity(intent)
+                    "I've opened a text to $name with your message filled in. Review it and tap Send when you're ready."
+                }
+                else -> "I found $name. The phone number is $number."
+            }
+        } catch (_: Exception) {
+            "I couldn't open the phone or messaging app on this device."
+        }
+    }
+
+    private fun findContactMatches(query: String): List<Pair<String, String>> {
+        val found = mutableListOf<Pair<String, String>>()
+        val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER)
+        contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) {
+                if (nameIndex < 0 || numberIndex < 0) continue
+                val name = cursor.getString(nameIndex)?.trim().orEmpty()
+                val number = cursor.getString(numberIndex)?.trim().orEmpty()
+                if (name.isNotBlank() && number.isNotBlank() && name.contains(query, ignoreCase = true) && found.none { it.second == number }) found.add(name to number)
+            }
+        }
+        val exact = found.filter { it.first.equals(query, ignoreCase = true) }
+        return if (exact.isNotEmpty()) exact else found
+    }
+
     private fun handleMessage(message: String) {
+        val contactReply = handleContactCommand(message)
+        if (contactReply != null) {
+            showReply(message, contactReply)
+            return
+        }
         val lower = message.lowercase(Locale.ROOT)
         val localReply: String? = when {
             lower.contains("what do you remember") || lower.contains("show memory") ->
