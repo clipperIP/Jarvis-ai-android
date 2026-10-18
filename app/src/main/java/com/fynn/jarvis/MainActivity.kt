@@ -247,7 +247,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "Jarvis is thinking..."
         thread {
             try {
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 15000
@@ -274,7 +274,8 @@ User: $message"""
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 connection.disconnect()
                 if (code !in 200..299) {
-                    throw IllegalStateException("Google AI returned HTTP $code. Check the API key and API access.")
+                    val googleMessage = runCatching { JSONObject(responseText).getJSONObject("error").getString("message") }.getOrNull()
+                    throw IllegalStateException("Google AI returned HTTP $code: ${googleMessage ?: "Check the API key and model access."}")
                 }
                 val json = JSONObject(responseText)
                 val reply = json.getJSONArray("candidates").getJSONObject(0)
