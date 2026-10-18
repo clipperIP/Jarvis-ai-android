@@ -236,20 +236,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val localModel = field("AI model (qwen2.5:0.5b or gpt-4o-mini)", prefs.getString("local_model", "qwen2.5:0.5b") ?: "qwen2.5:0.5b")
-        val openAiKey = field("OpenAI API key (needed for GPT models)", prefs.getString("openai_api_key", "") ?: "", true)
+        val localModel = field("Gemini model (recommended: gemini-2.5-flash)", prefs.getString("local_model", "gemini-2.5-flash") ?: "gemini-2.5-flash")
+        val geminiKey = field("Gemini API key (required)", prefs.getString("gemini_api_key", "") ?: "", true)
         val fishKey = field("Fish Audio API key (optional)", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "Use qwen2.5:0.5b for local Ollama (Termux must be running), or gpt-4o-mini for OpenAI GPT (requires your OpenAI API key and may cost money). Fish Audio is optional for voice output."
+            text = "Jarvis now uses Google Gemini. Recommended model: gemini-2.5-flash. Enter your Gemini API key below. API usage may be subject to Google AI Studio limits or billing. Fish Audio is optional for voice output."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
         }
         panel.addView(help, matchWrap())
         panel.addView(localModel, matchWrap())
-        panel.addView(openAiKey, matchWrap())
+        panel.addView(geminiKey, matchWrap())
         panel.addView(fishKey, matchWrap())
         panel.addView(jarvisVoice, matchWrap())
         panel.addView(ultronVoice, matchWrap())
@@ -267,10 +267,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     status.text = "Settings not saved. Enter a model name and both voice IDs."
                     return@setPositiveButton
                 }
-                prefs.edit().putString("local_model", model).putString("openai_api_key", openAiKey.text.toString().trim())
+                prefs.edit().putString("local_model", model).putString("gemini_api_key", geminiKey.text.toString().trim())
                     .putString("fish_api_key", fKey).putString("fish_voice_id", jVoice)
                     .putString("ultron_voice_id", uVoice).apply()
-                status.text = "Local AI settings saved."
+                status.text = "Gemini settings saved."
             }
             .show()
     }
@@ -568,20 +568,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "$speaker is thinking..."
         thread {
             try {
-                val model = prefs.getString("local_model", "qwen2.5:0.5b")?.trim().orEmpty().ifBlank { "qwen2.5:0.5b" }
-                val useOpenAi = model.startsWith("gpt-", ignoreCase = true)
-                val openAiKey = prefs.getString("openai_api_key", "")?.trim().orEmpty()
-                if (useOpenAi && openAiKey.isBlank()) {
-                    throw IllegalStateException("To use GPT, open Assistant Settings, enter your OpenAI API key, and save settings.")
+                val model = prefs.getString("local_model", "gemini-2.5-flash")?.trim().orEmpty().ifBlank { "gemini-2.5-flash" }
+                val geminiKey = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
+                if (geminiKey.isBlank()) {
+                    throw IllegalStateException("To use Gemini, open Assistant Settings, enter your Gemini API key, and save settings.")
                 }
-                val url = URL(if (useOpenAi) "https://api.openai.com/v1/chat/completions" else "http://127.0.0.1:11434/api/chat")
+                val safeModel = model.removePrefix("models/").ifBlank { "gemini-2.5-flash" }
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$safeModel:generateContent?key=$geminiKey")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 5000
-                    readTimeout = if (useOpenAi) 60000 else 120000
+                    readTimeout = 60000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
-                    if (useOpenAi) setRequestProperty("Authorization", "Bearer $openAiKey")
+                    
                 }
                 val facts = (prefs.getString("facts", "") ?: "").takeLast(900)
                 val fullConversationMemory = readRecentConversationLog(6000)
@@ -639,16 +639,24 @@ $webContext"""
                     }
                 }
                 chatMessages.put(JSONObject().put("role", "user").put("content", cleanMessage))
-                val body = JSONObject()
-                    .put("model", model)
-                    .put("messages", chatMessages)
-                    .put("stream", false)
-                if (useOpenAi) {
-                    body.put("temperature", 0.7).put("max_tokens", 180)
-                } else {
-                    body.put("keep_alive", "10m")
-                        .put("options", JSONObject().put("temperature", 0.55).put("num_predict", 120).put("num_ctx", 2048))
+                val geminiContents = JSONArray()
+                var systemInstruction = systemPrompt
+                for (i in 0 until chatMessages.length()) {
+                    val item = chatMessages.getJSONObject(i)
+                    val role = item.optString("role")
+                    val content = item.optString("content")
+                    if (role == "system") {
+                        systemInstruction = content
+                    } else {
+                        geminiContents.put(JSONObject()
+                            .put("role", if (role == "assistant") "model" else "user")
+                            .put("parts", JSONArray().put(JSONObject().put("text", content))))
+                    }
                 }
+                val body = JSONObject()
+                    .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction))))
+                    .put("contents", geminiContents)
+                    .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 512))
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
@@ -656,12 +664,13 @@ $webContext"""
                 connection.disconnect()
                 if (code !in 200..299) {
                     val details = try { JSONObject(responseText).optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
-                    val source = if (useOpenAi) "OpenAI GPT" else "local Ollama"
-                    val fallback = if (useOpenAi) "Check your API key, API billing, and model name in Assistant Settings." else "Start Ollama in Termux and check that the configured model is installed."
-                    throw IllegalStateException("$source returned HTTP $code. " + details.ifBlank { fallback })
+                    throw IllegalStateException("Google Gemini returned HTTP $code. " + details.ifBlank { "Check your Gemini API key, model name, and Google AI Studio quota/billing." })
                 }
                 val json = JSONObject(responseText)
-                val rawReply = if (useOpenAi) json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content") else json.getJSONObject("message").getString("content")
+                val candidates = json.optJSONArray("candidates")
+                val rawReply = candidates?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.let { parts ->
+                    (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.optString("text")?.takeIf { text -> text.isNotBlank() } }.joinToString("\n")
+                }.orEmpty().ifBlank { throw IllegalStateException("Gemini returned no text. Try again or check your API quota.") }
                 val reply = removeImpersonatedUserLines(rawReply)
                 runOnUiThread {
                     val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
@@ -673,7 +682,7 @@ $webContext"""
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    val reply = "I couldn't reach the local AI. Open Termux and run 'ollama serve', then make sure the configured model is installed. Details: ${e.message ?: "connection failed"}"
+                    val reply = "I couldn't reach Google Gemini. Check your internet connection, Gemini API key, model name, and API quota. Details: ${e.message ?: "connection failed"}"
                     showReply(message, reply, speaker)
                 }
             }
