@@ -359,7 +359,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val speaker = when {
             Regex("(?i)\\b(?:hey\\s+)?ultron\\b").containsMatchIn(message) -> "Ultron"
             Regex("(?i)\\b(?:hey\\s+)?jarvis\\b").containsMatchIn(message) -> "Jarvis"
-            else -> speaker
+            else -> assistant
         }
         activeAssistant = speaker
         val cleanMessage = message.replace(Regex("(?i)^\\s*(?:hey\\s+)?(?:jarvis|ultron)[,:\\s]*"), "").trim().ifBlank { message }
@@ -381,7 +381,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 "Saved to my local memory, Fynn."
             }
             lower.contains("who are you") || lower.contains("your name") ->
-                "I am Jarvis, your personal voice speaker."
+                "I am $speaker, your personal AI assistant."
             lower.contains("hello") || lower.contains("hi jarvis") || lower == "hi" ->
                 "Hello, Fynn. How can I help?"
             lower.contains("what time") || lower == "time" ->
@@ -395,7 +395,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val key = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
         if (key.isBlank()) {
             val reply = "My AI brain isn't connected yet. Add a Google AI Studio API key in the AI Brain Setup section, then tap Save."
-            showReply(message, reply)
+            showReply(cleanMessage, reply, speaker)
             return
         }
         status.text = "$speaker is thinking..."
@@ -419,7 +419,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val persona = if (speaker.equals("Ultron", ignoreCase = true)) {
                     "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Cooperate with Jarvis using the shared conversation context. Do not threaten Fynn or claim to control devices."
                 } else {
-                    "You are J.A.R.V.I.S., Fynn's personal voice speaker and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
+                    "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
                 val prompt = """$persona Answer the user's actual question; never repeat setup/status text unless asked. The user's saved local facts are:
 $facts
