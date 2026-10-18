@@ -356,25 +356,32 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun handleMessage(message: String, assistant: String = activeAssistant) {
-        val contactReply = handleContactCommand(message)
+        val speaker = when {
+            Regex("(?i)\\b(?:hey\\s+)?ultron\\b").containsMatchIn(message) -> "Ultron"
+            Regex("(?i)\\b(?:hey\\s+)?jarvis\\b").containsMatchIn(message) -> "Jarvis"
+            else -> speaker
+        }
+        activeAssistant = speaker
+        val cleanMessage = message.replace(Regex("(?i)^\\s*(?:hey\\s+)?(?:jarvis|ultron)[,:\\s]*"), "").trim().ifBlank { message }
+        val contactReply = handleContactCommand(cleanMessage)
         if (contactReply != null) {
-            showReply(message, contactReply, assistant)
+            showReply(cleanMessage, contactReply, speaker)
             return
         }
-        val lower = message.lowercase(Locale.ROOT)
+        val lower = cleanMessage.lowercase(Locale.ROOT)
         val localReply: String? = when {
             lower.contains("what do you remember") || lower.contains("show memory") ->
                 "Here's what I remember: ${prefs.getString("facts", "No saved facts yet.")}"
             lower.startsWith("remember that ") -> {
-                addMemory(message.substringAfter("remember that ").trim())
+                addMemory(cleanMessage.substringAfter("remember that ").trim())
                 "Understood, Fynn. I'll keep that in my local memory."
             }
             lower.startsWith("remember ") -> {
-                addMemory(message.substringAfter("remember ").trim())
+                addMemory(cleanMessage.substringAfter("remember ").trim())
                 "Saved to my local memory, Fynn."
             }
             lower.contains("who are you") || lower.contains("your name") ->
-                "I am Jarvis, your personal voice assistant."
+                "I am Jarvis, your personal voice speaker."
             lower.contains("hello") || lower.contains("hi jarvis") || lower == "hi" ->
                 "Hello, Fynn. How can I help?"
             lower.contains("what time") || lower == "time" ->
@@ -382,7 +389,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else -> null
         }
         if (localReply != null) {
-            showReply(message, localReply, assistant)
+            showReply(cleanMessage, localReply, speaker)
             return
         }
         val key = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
@@ -391,7 +398,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             showReply(message, reply)
             return
         }
-        status.text = "$assistant is thinking..."
+        status.text = "$speaker is thinking..."
         thread {
             try {
                 val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent")
@@ -404,26 +411,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     setRequestProperty("x-goog-api-key", key)
                 }
                 val facts = prefs.getString("facts", "") ?: ""
-                val historyKey = if (assistant.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
+                val historyKey = if (speaker.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
                 val history = prefs.getString(historyKey, "") ?: ""
-                val peerHistoryKey = if (assistant.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
-                val peerName = if (assistant.equals("Ultron", ignoreCase = true)) "Jarvis" else "Ultron"
+                val peerHistoryKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
+                val peerName = if (speaker.equals("Ultron", ignoreCase = true)) "Jarvis" else "Ultron"
                 val peerHistory = prefs.getString(peerHistoryKey, "") ?: ""
-                val persona = if (assistant.equals("Ultron", ignoreCase = true)) {
+                val persona = if (speaker.equals("Ultron", ignoreCase = true)) {
                     "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Cooperate with Jarvis using the shared conversation context. Do not threaten Fynn or claim to control devices."
                 } else {
-                    "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
+                    "You are J.A.R.V.I.S., Fynn's personal voice speaker and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
                 val prompt = """$persona Answer the user's actual question; never repeat setup/status text unless asked. The user's saved local facts are:
 $facts
 
-Recent conversation with $assistant:
+Recent conversation with $speaker:
 $history
 
 Recent shared context from $peerName:
 $peerHistory
 
-User: $message"""
+User: $cleanMessage"""
                 val body = JSONObject()
                     .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
                     .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 500))
@@ -440,9 +447,12 @@ User: $message"""
                 val reply = json.getJSONArray("candidates").getJSONObject(0)
                     .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
                 runOnUiThread {
-                    val updatedHistory = (history + "\nUser: " + message + "\n" + assistant + ": " + reply).takeLast(6000)
-                    prefs.edit().putString(historyKey, updatedHistory).apply()
-                    showReply(message, reply, assistant)
+                    val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
+                    val peerKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
+                    val peerHistory = prefs.getString(peerKey, "") ?: ""
+                    val sharedTurn = "\nFynn said to " + speaker + ": " + cleanMessage + "\n" + speaker + ": " + reply
+                    prefs.edit().putString(historyKey, updatedHistory).putString(peerKey, (peerHistory + sharedTurn).takeLast(6000)).apply()
+                    showReply(cleanMessage, reply, speaker)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
