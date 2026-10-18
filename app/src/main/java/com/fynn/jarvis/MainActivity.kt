@@ -18,6 +18,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -106,7 +107,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER
             background = makeOrbDrawable(false)
             elevation = 10f
-            setOnClickListener { listen() }
+            setOnClickListener { stopSpeaking(); listen() }
         }
         val orbParams = LinearLayout.LayoutParams(dp(224), dp(224)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
@@ -467,10 +468,39 @@ User: $cleanMessage"""
     }
 
     private fun showReply(message: String, reply: String, assistant: String = activeAssistant) {
+        val turns = reply.lines().filter { it.isNotBlank() }.map { line ->
+            val match = Regex("^\\s*\\[(JARVIS|ULTRON)\\]\\s*:\\s*(.*)$", RegexOption.IGNORE_CASE).matchEntire(line)
+            if (match != null) {
+                val who = if (match.groupValues[1].equals("ULTRON", ignoreCase = true)) "Ultron" else "Jarvis"
+                who to match.groupValues[2].trim()
+            } else {
+                assistant to line.trim()
+            }
+        }.filter { it.second.isNotBlank() }.ifEmpty { listOf(assistant to reply.trim()) }
         selectAssistant(assistant)
-        transcript.text = "YOU\n$message\n\n$assistant\n$reply"
-        status.text = "$assistant is replying..."
-        speak(reply, assistant)
+        transcript.text = "YOU\n$message\n\n" + turns.joinToString("\n\n") { (who, words) -> "$who\n$words" }
+        status.text = "Preparing voices..."
+        speakSequence(turns, 0)
+    }
+
+    private fun speakSequence(turns: List<Pair<String, String>>, index: Int) {
+        if (index >= turns.size) {
+            status.text = "${activeAssistant.uppercase(Locale.ROOT)} • READY — TAP CORE TO SPEAK"
+            return
+        }
+        val (who, words) = turns[index]
+        selectAssistant(who)
+        status.text = "$who is speaking..."
+        speak(words, who) { speakSequence(turns, index + 1) }
+    }
+
+    private fun stopSpeaking() {
+        tts?.stop()
+        fishPlayer?.let { player ->
+            try { player.setOnCompletionListener(null); player.setOnErrorListener(null); player.stop() } catch (_: Exception) {}
+            player.release()
+        }
+        fishPlayer = null
     }
 
     private fun selectAssistant(name: String) {
@@ -521,7 +551,7 @@ User: $cleanMessage"""
         }
     }
 
-    private fun speak(text: String, assistant: String = "Jarvis") {
+    private fun speak(text: String, assistant: String = "Jarvis", onComplete: (() -> Unit)? = null) {
         val key = prefs.getString("fish_api_key", "")?.trim().orEmpty()
         val voiceId = if (assistant.equals("Ultron", ignoreCase = true)) {
             prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf")?.trim().orEmpty()
@@ -530,7 +560,7 @@ User: $cleanMessage"""
         }
         runOnUiThread { selectAssistant(assistant) }
         if (key.isBlank()) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "${assistant.lowercase(Locale.ROOT)}_reply")
+            speakWithSystemVoice(text, assistant, onComplete)
             return
         }
         thread {
@@ -569,10 +599,12 @@ User: $cleanMessage"""
                             setOnCompletionListener { player ->
                                 player.release()
                                 if (fishPlayer === player) fishPlayer = null
+                                onComplete?.invoke()
                             }
                             setOnErrorListener { player, _, _ ->
                                 player.release()
                                 if (fishPlayer === player) fishPlayer = null
+                                onComplete?.invoke()
                                 true
                             }
                             prepareAsync()
@@ -584,12 +616,32 @@ User: $cleanMessage"""
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "Fish Audio voice unavailable: ${e.message ?: "check API key and voice ID"}"
-                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "${assistant.lowercase(Locale.ROOT)}_reply_fallback")
+                    speakWithSystemVoice(text, assistant, onComplete)
                 }
             } finally {
                 connection?.disconnect()
             }
         }
+    }
+
+    private fun speakWithSystemVoice(text: String, assistant: String, onComplete: (() -> Unit)?) {
+        val engine = tts ?: run {
+            onComplete?.invoke()
+            return
+        }
+        if (onComplete != null) {
+            engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    mainHandler.post { onComplete.invoke() }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    mainHandler.post { onComplete.invoke() }
+                }
+            })
+        }
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "${assistant.lowercase(Locale.ROOT)}_reply_${System.currentTimeMillis()}")
     }
 
     override fun onDestroy() {
