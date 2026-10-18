@@ -430,6 +430,8 @@ $history
 Recent shared context from $peerName:
 $peerHistory
 
+You are friendly teammates sharing a conversation. Normally answer as $speaker. When genuinely useful, you may add a short back-and-forth with the other assistant using separate lines prefixed [JARVIS]: or [ULTRON]:, with up to three total lines. Let them correct each other naturally, but do not force disagreement.
+
 User: $cleanMessage"""
                 val body = JSONObject()
                     .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
