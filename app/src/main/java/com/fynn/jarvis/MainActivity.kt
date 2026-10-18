@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -40,6 +42,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var fishApiKeyInput: EditText
     private lateinit var fishVoiceInput: EditText
     private var fishPlayer: MediaPlayer? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var handsFreeEnabled = false
     private lateinit var memoryView: TextView
     private val prefs by lazy { getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE) }
     private val requestAudio = 42
@@ -88,6 +92,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val mic = Button(this).apply {
             text = "TALK TO JARVIS"
             setOnClickListener { listen() }
+        }
+        val handsFree = Button(this).apply {
+            text = "ENABLE HANDS-FREE MODE"
+            setOnClickListener {
+                handsFreeEnabled = !handsFreeEnabled
+                text = if (handsFreeEnabled) "HANDS-FREE MODE: ON (TAP TO STOP)" else "ENABLE HANDS-FREE MODE"
+                if (handsFreeEnabled) {
+                    status.text = "Hands-free mode on. Speak after Jarvis finishes talking."
+                    listen()
+                } else {
+                    mainHandler.removeCallbacksAndMessages(null)
+                    recognizer?.cancel()
+                    status.text = "Hands-free mode off."
+                }
+            }
         }
         input = EditText(this).apply {
             hint = "Type a message or a fact to remember..."
@@ -191,6 +210,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         content.addView(status, matchWrap())
         content.addView(transcript, matchWrap())
         content.addView(mic, matchWrap())
+        content.addView(handsFree, matchWrap())
         content.addView(input, matchWrap())
         content.addView(send, matchWrap())
         content.addView(aiTitle, matchWrap())
@@ -248,7 +268,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() { status.text = "Thinking..." }
-            override fun onError(error: Int) { status.text = "Didn't catch that. Tap the microphone to try again." }
+            override fun onError(error: Int) {
+                status.text = if (handsFreeEnabled) "Didn't catch that. Listening again..." else "Didn't catch that. Tap the microphone to try again."
+                if (handsFreeEnabled) scheduleNextListen(1200)
+            }
             override fun onResults(results: Bundle?) {
                 val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
                 if (!words.isNullOrBlank()) handleMessage(words) else status.text = "I didn't hear any words."
@@ -348,8 +371,19 @@ User: $message"""
 
     private fun showReply(message: String, reply: String) {
         transcript.text = "You: $message\n\nJarvis: $reply"
-        status.text = "Ready, Fynn."
+        status.text = if (handsFreeEnabled) "Jarvis is replying. I'll listen again afterward." else "Ready, Fynn."
         speak(reply)
+        if (handsFreeEnabled) {
+            // Estimate speech duration so the microphone doesn't restart over Jarvis's reply.
+            scheduleNextListen((reply.length * 75L + 1800L).coerceIn(3500L, 30000L))
+        }
+    }
+
+    private fun scheduleNextListen(delayMs: Long) {
+        mainHandler.removeCallbacksAndMessages(null)
+        mainHandler.postDelayed({
+            if (handsFreeEnabled && !isFinishing && !isDestroyed) listen()
+        }, delayMs)
     }
 
     private fun rememberFromInput() {
