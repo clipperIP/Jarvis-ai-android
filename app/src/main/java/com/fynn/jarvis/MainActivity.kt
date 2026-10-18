@@ -520,19 +520,41 @@ User: $cleanMessage"""
     }
 
     private fun showReply(message: String, reply: String, assistant: String = activeAssistant) {
-        val turns = reply.lines().filter { it.isNotBlank() }.map { line ->
-            val match = Regex("^\\s*\\[(JARVIS|ULTRON)\\]\\s*:\\s*(.*)$", RegexOption.IGNORE_CASE).matchEntire(line)
-            if (match != null) {
-                val who = if (match.groupValues[1].equals("ULTRON", ignoreCase = true)) "Ultron" else "Jarvis"
-                who to match.groupValues[2].trim()
+        // Accept both [JARVIS]: and JARVIS: labels, even when the model puts
+        // the entire multi-speaker conversation on one physical line.
+        val marker = Regex("(?i)(?:\\[\\s*)?(JARVIS|ULTRON)(?:\\s*\\])?\\s*:")
+        val matches = marker.findAll(reply).toList()
+        val turns = mutableListOf<Pair<String, String>>()
+
+        fun addTurn(who: String, words: String) {
+            val cleaned = words.trim().trimStart('-', '•', ' ')
+            if (cleaned.isBlank()) return
+            val last = turns.lastOrNull()
+            if (last != null && last.first.equals(who, ignoreCase = true)) {
+                turns[turns.lastIndex] = last.first to (last.second + " " + cleaned)
             } else {
-                assistant to line.trim()
+                turns.add(who to cleaned)
             }
-        }.filter { it.second.isNotBlank() }.ifEmpty { listOf(assistant to reply.trim()) }
+        }
+
+        if (matches.isEmpty()) {
+            reply.lines().filter { it.isNotBlank() }.forEach { addTurn(assistant, it) }
+        } else {
+            val first = matches.first()
+            if (first.range.first > 0) addTurn(assistant, reply.substring(0, first.range.first))
+            matches.forEachIndexed { index, match ->
+                val who = if (match.groupValues[1].equals("ULTRON", ignoreCase = true)) "Ultron" else "Jarvis"
+                val start = match.range.last + 1
+                val end = if (index + 1 < matches.size) matches[index + 1].range.first else reply.length
+                addTurn(who, reply.substring(start, end))
+            }
+        }
+
+        val safeTurns = turns.filter { it.second.isNotBlank() }.ifEmpty { listOf(assistant to reply.trim()) }
         selectAssistant(assistant)
-        transcript.text = "YOU\n$message\n\n" + turns.joinToString("\n\n") { (who, words) -> "$who\n$words" }
+        transcript.text = "YOU\n$message\n\n" + safeTurns.joinToString("\n\n") { (who, words) -> "$who\n$words" }
         status.text = "Preparing voices..."
-        speakSequence(turns, 0)
+        speakSequence(safeTurns, 0)
     }
 
     private fun speakSequence(turns: List<Pair<String, String>>, index: Int) {
