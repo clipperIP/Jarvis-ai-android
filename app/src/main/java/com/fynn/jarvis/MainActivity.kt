@@ -497,10 +497,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val json = JSONObject(responseText)
                 val reply = json.getJSONObject("message").getString("content").trim()
                 runOnUiThread {
-                    val updatedHistory = (history + "\\nUser: " + cleanMessage + "\\n" + speaker + ": " + reply).takeLast(6000)
+                    val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
                     val peerKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
                     val previousPeerHistory = prefs.getString(peerKey, "") ?: ""
-                    val sharedTurn = "\\nFynn said to " + speaker + ": " + cleanMessage + "\\n" + speaker + ": " + reply
+                    val sharedTurn = "\nFynn said to " + speaker + ": " + cleanMessage + "\n" + speaker + ": " + reply
                     prefs.edit().putString(historyKey, updatedHistory).putString(peerKey, (previousPeerHistory + sharedTurn).takeLast(6000)).apply()
                     showReply(cleanMessage, reply, speaker)
                 }
