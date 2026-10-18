@@ -480,15 +480,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 } else {
                     "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
-                val prompt = """$persona Be fast and concise. Use the supplied live web results for current questions. Never invent current facts when results are missing. Saved facts: $facts
-Recent $speaker conversation: $history
-Shared context from $peerName: $peerHistory
-$webContext
-Normally answer as $speaker. Use [JARVIS]: or [ULTRON]: extra dialogue only when helpful, no more than two short lines.
-User: $cleanMessage"""
-                val body = JSONObject()
+                val systemPrompt = """$persona\nYou are currently speaking as $speaker. Respond only as $speaker in one normal reply.\nDo not write a conversation or roleplay both assistants. Do not add character labels or a second character dialogue unless Fynn explicitly asks for both assistants.\nAnswer the actual question first. Use supplied live web results for current facts. If results do not contain the answer, say you could not verify it rather than making it up. Be natural, concise, and avoid unrelated greetings.\nSaved facts: $facts\nRecent $speaker conversation: $history\nShared context from $peerName: $peerHistory\n$webContext"""\n                val body = JSONObject()
                     .put("model", model)
-                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+                    .put("messages", JSONArray()\n                        .put(JSONObject().put("role", "system").put("content", systemPrompt))\n                        .put(JSONObject().put("role", "user").put("content", cleanMessage)))
                     .put("stream", false)
                     .put("keep_alive", "10m")
                     .put("options", JSONObject().put("temperature", 0.3).put("num_predict", 160).put("num_ctx", 2048))
