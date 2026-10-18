@@ -566,13 +566,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         thread {
             try {
                 val model = prefs.getString("local_model", "qwen2.5:0.5b")?.trim().orEmpty().ifBlank { "qwen2.5:0.5b" }
-                val url = URL("http://127.0.0.1:11434/api/chat")
+                val useOpenAi = model.startsWith("gpt-", ignoreCase = true)
+                val openAiKey = prefs.getString("openai_api_key", "")?.trim().orEmpty()
+                if (useOpenAi && openAiKey.isBlank()) {
+                    throw IllegalStateException("To use GPT, open Assistant Settings, enter your OpenAI API key, and save settings.")
+                }
+                val url = URL(if (useOpenAi) "https://api.openai.com/v1/chat/completions" else "http://127.0.0.1:11434/api/chat")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 5000
-                    readTimeout = 120000
+                    readTimeout = if (useOpenAi) 60000 else 120000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
+                    if (useOpenAi) setRequestProperty("Authorization", "Bearer $openAiKey")
                 }
                 val facts = (prefs.getString("facts", "") ?: "").takeLast(900)
                 val fullConversationMemory = readRecentConversationLog(6000)
