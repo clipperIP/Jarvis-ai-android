@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -21,6 +22,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -35,6 +37,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var transcript: TextView
     private lateinit var input: EditText
     private lateinit var apiKeyInput: EditText
+    private lateinit var fishApiKeyInput: EditText
+    private lateinit var fishVoiceInput: EditText
+    private var fishPlayer: MediaPlayer? = null
     private lateinit var memoryView: TextView
     private val prefs by lazy { getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE) }
     private val requestAudio = 42
@@ -126,6 +131,47 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
         }
+        val fishTitle = TextView(this).apply {
+            text = "FISH AUDIO VOICE SETUP"
+            textSize = 14f
+            setTextColor(Color.rgb(95, 210, 255))
+            setPadding(0, 20, 0, 6)
+        }
+        val fishInfo = TextView(this).apply {
+            text = "Jarvis uses Fish Audio for spoken replies. Your selected voice is prefilled below."
+            textSize = 13f
+            setTextColor(Color.LTGRAY)
+        }
+        fishApiKeyInput = EditText(this).apply {
+            hint = "Paste your Fish Audio API key"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(prefs.getString("fish_api_key", "") ?: "")
+        }
+        fishVoiceInput = EditText(this).apply {
+            hint = "Fish Audio voice/model ID"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(prefs.getString("fish_voice_id", "2b1e19ec57ed4786b75a2d2db74fdcf1") ?: "2b1e19ec57ed4786b75a2d2db74fdcf1")
+        }
+        val saveFish = Button(this).apply {
+            text = "Save Fish Audio voice"
+            setOnClickListener {
+                val key = fishApiKeyInput.text.toString().trim()
+                val voiceId = fishVoiceInput.text.toString().trim()
+                if (key.isBlank()) {
+                    status.text = "Paste your Fish Audio API key first."
+                } else if (voiceId.isBlank()) {
+                    status.text = "Enter your Fish Audio voice/model ID."
+                } else {
+                    prefs.edit().putString("fish_api_key", key).putString("fish_voice_id", voiceId).apply()
+                    status.text = "Fish Audio voice saved on this device."
+                    speak("Fish Audio voice saved. I am ready, Fynn.")
+                }
+            }
+        }
         val memoryTitle = TextView(this).apply {
             text = "LOCAL MEMORY"
             textSize = 14f
@@ -150,6 +196,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         content.addView(aiTitle, matchWrap())
         content.addView(apiKeyInput, matchWrap())
         content.addView(saveKey, matchWrap())
+        content.addView(fishTitle, matchWrap())
+        content.addView(fishInfo, matchWrap())
+        content.addView(fishApiKeyInput, matchWrap())
+        content.addView(fishVoiceInput, matchWrap())
+        content.addView(saveFish, matchWrap())
         content.addView(memoryTitle, matchWrap())
         content.addView(memoryView, matchWrap())
         content.addView(saveMemory, matchWrap())
@@ -330,11 +381,75 @@ User: $message"""
     }
 
     private fun speak(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+        val key = prefs.getString("fish_api_key", "")?.trim().orEmpty()
+        val voiceId = prefs.getString("fish_voice_id", "2b1e19ec57ed4786b75a2d2db74fdcf1")?.trim().orEmpty()
+        if (key.isBlank()) {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+            return
+        }
+        thread {
+            var connection: HttpURLConnection? = null
+            try {
+                val url = URL("https://api.fish.audio/v1/tts")
+                connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 60000
+                    doOutput = true
+                    setRequestProperty("Authorization", "Bearer $key")
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("model", "s2.1-pro-free")
+                }
+                val body = JSONObject()
+                    .put("text", text)
+                    .put("reference_id", voiceId)
+                    .put("format", "mp3")
+                connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                if (code !in 200..299) {
+                    val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty().take(300)
+                    throw IllegalStateException("Fish Audio HTTP $code: $detail")
+                }
+                val audioFile = File(cacheDir, "jarvis_fish_reply.mp3")
+                connection.inputStream.use { inputStream ->
+                    audioFile.outputStream().use { outputStream -> inputStream.copyTo(outputStream) }
+                }
+                runOnUiThread {
+                    try {
+                        fishPlayer?.release()
+                        fishPlayer = MediaPlayer().apply {
+                            setDataSource(audioFile.absolutePath)
+                            setOnPreparedListener { it.start() }
+                            setOnCompletionListener { player ->
+                                player.release()
+                                if (fishPlayer === player) fishPlayer = null
+                            }
+                            setOnErrorListener { player, _, _ ->
+                                player.release()
+                                if (fishPlayer === player) fishPlayer = null
+                                true
+                            }
+                            prepareAsync()
+                        }
+                    } catch (e: Exception) {
+                        status.text = "Fish Audio playback failed: ${e.message ?: "unknown error"}"
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "Fish Audio voice unavailable: ${e.message ?: "check API key and voice ID"}"
+                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply_fallback")
+                }
+            } finally {
+                connection?.disconnect()
+            }
+        }
     }
 
     override fun onDestroy() {
         recognizer?.destroy()
+        fishPlayer?.release()
+        fishPlayer = null
         tts?.stop()
         tts?.shutdown()
         super.onDestroy()
