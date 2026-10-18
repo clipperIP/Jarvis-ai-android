@@ -197,18 +197,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val geminiKey = field("Google AI Studio API key", prefs.getString("gemini_api_key", "") ?: "", true)
+        val groqKey = field("Groq API key (free tier)", prefs.getString("groq_api_key", "") ?: "", true)
         val fishKey = field("Fish Audio API key", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "API keys and voice IDs are saved on this device."
+            text = "Groq powers the AI and live web search. Keys and voice IDs are saved on this device."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
         }
         panel.addView(help, matchWrap())
-        panel.addView(geminiKey, matchWrap())
+        panel.addView(groqKey, matchWrap())
         panel.addView(fishKey, matchWrap())
         panel.addView(jarvisVoice, matchWrap())
         panel.addView(ultronVoice, matchWrap())
@@ -218,7 +218,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .setView(scroll)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save settings") { _, _ ->
-                val gKey = geminiKey.text.toString().trim()
+                val gKey = groqKey.text.toString().trim()
                 val fKey = fishKey.text.toString().trim()
                 val jVoice = jarvisVoice.text.toString().trim()
                 val uVoice = ultronVoice.text.toString().trim()
@@ -226,7 +226,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     status.text = "Settings not saved. Fill in all four fields first."
                     return@setPositiveButton
                 }
-                prefs.edit().putString("gemini_api_key", gKey).putString("fish_api_key", fKey)
+                prefs.edit().putString("groq_api_key", gKey).putString("fish_api_key", fKey)
                     .putString("fish_voice_id", jVoice).putString("ultron_voice_id", uVoice).apply()
                 status.text = "Settings saved on this device."
             }
@@ -393,23 +393,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             showReply(cleanMessage, localReply, speaker)
             return
         }
-        val key = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
+        val key = prefs.getString("groq_api_key", "")?.trim().orEmpty()
         if (key.isBlank()) {
-            val reply = "My AI brain isn't connected yet. Add a Google AI Studio API key in the AI Brain Setup section, then tap Save."
+            val reply = "My AI brain needs a Groq API key. Open Settings with the gear button and add one from console.groq.com."
             showReply(cleanMessage, reply, speaker)
             return
         }
         status.text = "$speaker is thinking..."
         thread {
             try {
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent")
+                val currentInfoQuestion = Regex("(?i)\\b(current|latest|today|tonight|yesterday|score|game|match|weather|news|price|released|release date|schedule|standings|recent|this week|last game|last night|right now|up to date|who won)\\b").containsMatchIn(cleanMessage)
+                val url = URL("https://api.groq.com/openai/v1/responses")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 15000
-                    readTimeout = 30000
+                    connectTimeout = 12000
+                    readTimeout = 45000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("x-goog-api-key", key)
+                    setRequestProperty("Authorization", "Bearer $key")
                 }
                 val facts = (prefs.getString("facts", "") ?: "").takeLast(2000)
                 val historyKey = if (speaker.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
@@ -435,21 +436,40 @@ You are friendly teammates sharing a conversation. Normally answer as $speaker. 
 
 User: $cleanMessage"""
                 val body = JSONObject()
-                    .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
-                    .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
-                    .put("generationConfig", JSONObject().put("temperature", 0.5).put("maxOutputTokens", 350))
+                    .put("model", "openai/gpt-oss-20b")
+                    .put("input", prompt)
+                    .put("max_output_tokens", 350)
+                    .put("reasoning", JSONObject().put("effort", "low"))
+                if (currentInfoQuestion) {
+                    body.put("tools", JSONArray().put(JSONObject().put("type", "browser_search")))
+                    body.put("tool_choice", "required")
+                }
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 connection.disconnect()
                 if (code !in 200..299) {
-                    val googleMessage = runCatching { JSONObject(responseText).getJSONObject("error").getString("message") }.getOrNull()
-                    throw IllegalStateException("Google AI returned HTTP $code: ${googleMessage ?: "Check the API key and model access."}")
+                    val apiMessage = runCatching { JSONObject(responseText).getJSONObject("error").optString("message") }.getOrNull()
+                    throw IllegalStateException("Groq API returned HTTP $code: ${apiMessage ?: "Check your Groq API key and usage limits."}")
                 }
                 val json = JSONObject(responseText)
-                val reply = json.getJSONArray("candidates").getJSONObject(0)
-                    .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
+                val output = json.optJSONArray("output") ?: JSONArray()
+                val answerParts = mutableListOf<String>()
+                for (i in 0 until output.length()) {
+                    val item = output.optJSONObject(i) ?: continue
+                    if (item.optString("type") != "message" || item.optString("role") != "assistant") continue
+                    val contentParts = item.optJSONArray("content") ?: continue
+                    for (j in 0 until contentParts.length()) {
+                        val part = contentParts.optJSONObject(j) ?: continue
+                        if (part.optString("type") == "output_text") {
+                            val text = part.optString("text").trim()
+                            if (text.isNotBlank()) answerParts.add(text)
+                        }
+                    }
+                }
+                val reply = answerParts.joinToString("\\n").trim()
+                if (reply.isBlank()) throw IllegalStateException("Groq returned an empty answer. Try again.")
                 runOnUiThread {
                     val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
                     val peerKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
