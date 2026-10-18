@@ -466,8 +466,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             lower.contains("why can't you have a conversation") || lower.contains("why can't you talk to me") || lower.contains("can't you have a conversation with me") ->
                 "I can talk with you, Fynn. I'm here with you right now. Sorry I gave you that strange, formal answer earlier. What's on your mind?"
-            lower.contains("skip school") || lower.contains("skip class") || lower.contains("should i stay home from school") ->
-                schoolAdvice()
+            lower.contains("skip school") || lower.contains("skip class") || lower.contains("should i stay home from school") -> {
+                val tomorrow = (Calendar.getInstance().clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
+                val day = tomorrow.get(Calendar.DAY_OF_WEEK)
+                if (day == Calendar.SUNDAY || day == Calendar.SATURDAY) {
+                    if (speaker.equals("Ultron", ignoreCase = true)) {
+                        "ULTRON: Excellent, Fynn. A day without school — the calendar has handed us a tiny victory.\nJARVIS: Do not celebrate too early, Ultron. Tomorrow is normally a weekend day, but Fynn should check for special classes or commitments."
+                    } else {
+                        "JARVIS: Tomorrow is normally a weekend day, Fynn, so you likely don't have regular school.\nULTRON: Ha! For once, the calendar has done my work for me. Try not to look so pleased, Jarvis."
+                    }
+                } else if (speaker.equals("Ultron", ignoreCase = true)) {
+                    "ULTRON: Skip it, Fynn. One little act of rebellion! What could possibly go wrong? 😈\nJARVIS: Not a chance. If tomorrow is a normal school day, you should go unless you're ill, unsafe, or dealing with something serious. Ultron is a terrible influence."
+                } else {
+                    "JARVIS: " + schoolAdvice() + "\nULTRON: Oh, splendid — the responsible answer. Must you make every plan so painfully sensible, Jarvis?"
+                }
+            }
             lower.contains("who are you") || lower.contains("your name") ->
                 "I am $speaker, your personal AI assistant and friend."
             lower.contains("hello") || lower.contains("hi jarvis") || lower == "hi" ->
