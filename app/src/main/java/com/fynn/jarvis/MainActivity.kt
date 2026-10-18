@@ -411,18 +411,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     setRequestProperty("Content-Type", "application/json")
                     setRequestProperty("x-goog-api-key", key)
                 }
-                val facts = prefs.getString("facts", "") ?: ""
+                val facts = (prefs.getString("facts", "") ?: "").takeLast(2000)
                 val historyKey = if (speaker.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
-                val history = prefs.getString(historyKey, "") ?: ""
+                val history = (prefs.getString(historyKey, "") ?: "").takeLast(2500)
                 val peerHistoryKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
                 val peerName = if (speaker.equals("Ultron", ignoreCase = true)) "Jarvis" else "Ultron"
-                val peerHistory = prefs.getString(peerHistoryKey, "") ?: ""
+                val peerHistory = (prefs.getString(peerHistoryKey, "") ?: "").takeLast(1500)
                 val persona = if (speaker.equals("Ultron", ignoreCase = true)) {
                     "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Cooperate with Jarvis using the shared conversation context. Do not threaten Fynn or claim to control devices."
                 } else {
                     "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
-                val prompt = """$persona Answer the user's actual question; never repeat setup/status text unless asked. The user's saved local facts are:
+                val prompt = """$persona Answer the user's actual question clearly and quickly. For current events, sports scores/schedules, weather, prices, news, recent releases, or anything that may have changed, use Google Search grounding and base the answer on current results. Never guess a current fact or claim an old event is the latest. If search cannot verify it, say so briefly. Keep ordinary answers concise. The user's saved local facts are:
 $facts
 
 Recent conversation with $speaker:
@@ -436,7 +436,8 @@ You are friendly teammates sharing a conversation. Normally answer as $speaker. 
 User: $cleanMessage"""
                 val body = JSONObject()
                     .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
-                    .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 500))
+                    .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+                    .put("generationConfig", JSONObject().put("temperature", 0.5).put("maxOutputTokens", 350))
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
