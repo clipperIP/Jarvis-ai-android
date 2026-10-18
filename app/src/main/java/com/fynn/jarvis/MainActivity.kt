@@ -581,7 +581,7 @@ $webContext"""
                 // Small local models follow conversational context much better this way.
                 val chatMessages = JSONArray()
                     .put(JSONObject().put("role", "system").put("content", systemPrompt))
-                val historyLines = history.split("\\n").map { it.trim() }.filter { it.isNotBlank() }.takeLast(12)
+                val historyLines = history.split("\n").map { it.trim() }.filter { it.isNotBlank() }.takeLast(12)
                 for (line in historyLines) {
                     when {
                         line.startsWith("User:", ignoreCase = true) ->
