@@ -294,10 +294,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val command = message.trim()
             .replace(Regex("(?i)^\\s*(?:hey\\s+)?jarvis[,:\\s]*"), "")
             .trim()
-        val callMatch = Regex("(?i)^(?:please\\s+)?call\\s+(.+?)\\s*$").find(command)
-        val textMatch = Regex("(?i)^(?:text|message)\\s+(.+?)\\s+(?:that|saying)\\s+(.+)$").find(command)
-        val lookupMatch = Regex("(?i)^(?:find|look up|lookup|show(?: me)?|what(?:'s| is))\\s+(.+?)\\s+(?:phone number|number|contact)$").find(command)
-        if (callMatch == null && textMatch == null && lookupMatch == null) return null
+        val callMatch = Regex("(?i)^(?:please\\s+)?call\\s+(?:my\\s+)?(.+?)\\s*$").find(command)
+        val textMatch = Regex("(?i)^(?:(?:text|message)\\s+(?:to\\s+)?(?:my\\s+)?|send\\s+(?:a\\s+)?text\\s+to\\s+(?:my\\s+)?)(.+?)\\s+(?:that|saying)\\s+(.+)$").find(command)
+        val lookupMatch = Regex("(?i)^(?:find|look up|lookup|show(?: me)?|what(?:'s| is))\\s+(?:my\\s+)?(.+?)\\s+(?:phone number|number|contact)$").find(command)
+        if (callMatch == null && textMatch == null && lookupMatch == null) {
+            return if (Regex("(?i)^(?:please\\s+)?(?:call|text|message|send\\s+(?:a\\s+)?text)\\b").containsMatchIn(command)) {
+                "I couldn't understand that contact command. Try: call Dad, or text Dad saying I'll be there soon."
+            } else null
+        }
         if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), requestContacts)
             return "I need permission to read your contacts. Allow Contacts access, then repeat your command."
@@ -306,7 +310,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             callMatch != null -> callMatch.groupValues[1]
             textMatch != null -> textMatch.groupValues[1]
             else -> lookupMatch!!.groupValues[1]
-        }.trim().removeSuffix("'s").removeSuffix("’s").trim()
+        }.trim().removePrefix("my ").removePrefix("My ").removeSuffix("'s").removeSuffix("’s").trim()
         if (rawName.isBlank()) return "Tell me the contact's name, Fynn."
         val matches = findContactMatches(rawName)
         if (matches.isEmpty()) return "I couldn't find a contact matching $rawName."
