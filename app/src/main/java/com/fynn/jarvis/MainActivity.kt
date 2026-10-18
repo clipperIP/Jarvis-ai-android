@@ -36,6 +36,7 @@ import java.net.URL
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 import kotlin.concurrent.thread
 
@@ -323,6 +324,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
 
+    private fun dateAwarenessContext(): String {
+        val today = Calendar.getInstance()
+        val tomorrow = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
+        val dateFormat = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault())
+        val timeFormat = SimpleDateFormat("h:mm a z", Locale.getDefault())
+        return "Device-local date and time: ${dateFormat.format(today.time)}, ${timeFormat.format(today.time)}. " +
+            "Tomorrow is ${dateFormat.format(tomorrow.time)}. Use this live calendar context for relative dates and weekdays; never guess what day tomorrow is."
+    }
+
+    private fun schoolAdvice(): String {
+        val tomorrow = (Calendar.getInstance().clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
+        val day = tomorrow.get(Calendar.DAY_OF_WEEK)
+        val dayName = SimpleDateFormat("EEEE", Locale.getDefault()).format(tomorrow.time)
+        return when (day) {
+            Calendar.SUNDAY -> "Nice try, Fynn 😄 Tomorrow is Sunday, so you normally wouldn't have school anyway. Unless you have weekend classes or a special event, there's nothing to skip."
+            Calendar.SATURDAY -> "Fynn, tomorrow is Saturday, so you normally wouldn't have school. Unless you have weekend classes or a special event, there's nothing to skip."
+            else -> "Honestly, Fynn, tomorrow is $dayName, which is usually a school day. I'd plan to go unless you're sick, unsafe, or dealing with something serious. If there's a reason you want to skip, tell me and we'll think it through."
+        }
+    }
+
     private fun needsLiveSearch(query: String): Boolean {
         val q = query.lowercase(Locale.ROOT)
         val triggers = listOf("latest", "current", "right now", "today", "tonight", "this week", "breaking", "news", "weather", "forecast", "score", "scores", "standings", "schedule", "results", "price", "stock", "exchange rate", "recent", "2026", "2025", "who won", "what happened", "updated", "up to date")
@@ -446,7 +467,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             lower.contains("why can't you have a conversation") || lower.contains("why can't you talk to me") || lower.contains("can't you have a conversation with me") ->
                 "I can talk with you, Fynn. I'm here with you right now. Sorry I gave you that strange, formal answer earlier. What's on your mind?"
             lower.contains("skip school") || lower.contains("skip class") || lower.contains("should i stay home from school") ->
-                "Honestly, Fynn, if you're feeling okay and nothing serious is going on, I'd go to school. If you're sick, overwhelmed, or dealing with something important, tell me what's happening and we can think it through. Ultron might have his own take too."
+                schoolAdvice()
             lower.contains("who are you") || lower.contains("your name") ->
                 "I am $speaker, your personal AI assistant and friend."
             lower.contains("hello") || lower.contains("hi jarvis") || lower == "hi" ->
@@ -485,6 +506,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
                 val systemPrompt = """$persona
+${dateAwarenessContext()}
 You are currently speaking as $speaker. Respond only as $speaker in one normal reply.
 You are directly chatting with Fynn inside this app. You absolutely can communicate with him here. Never say you cannot communicate with Fynn, never refer him to official channels, and never treat him as a third party who is not present.
 When Fynn asks for your opinion or asks what he should do, give a clear, friendly opinion first, then briefly explain why. Do not respond with a generic question that ignores what he asked. For school attendance, generally encourage going unless illness, safety, or a serious personal circumstance is involved; ask about the circumstance only if needed.
@@ -493,6 +515,8 @@ If Fynn makes a casual statement, joke, greeting, or says what he is doing, repl
 For example, if Fynn says he is hanging out with Ultron, respond conversationally about hanging out with Ultron; do not say you are hanging out with Fynn, invent a quote from Fynn, or switch into a made-up dialogue.
 Do not write a conversation or roleplay both assistants. Do not add character labels or a second character dialogue unless Fynn explicitly asks for both assistants.
 For questions, answer the actual question first. Use supplied live web results for current facts. If results do not contain the answer to a current-facts question, say you could not verify it rather than making it up. Be concise, friendly, and avoid unrelated greetings.
+Be genuinely thoughtful and alert to trick questions, riddles, misleading wording, false assumptions, sarcasm, and wordplay. Read the exact wording carefully before answering; do not rush to accept a premise just because Fynn states it. If a question is ambiguous, briefly explain the likely interpretations or ask one focused clarification. Check simple arithmetic and logical steps instead of guessing. Separate known facts from assumptions, admit uncertainty when appropriate, and correct mistakes plainly. Do not claim to know everything or fabricate details.
+Use the device-local date and weekday provided above for words like today, tomorrow, yesterday, and this weekend. For school questions, account for the actual weekday first; weekends usually mean no regular school, while recognizing special classes or events can exist. Do not treat a generic school-day assumption as more reliable than the live calendar.
 Saved facts: $facts
 Recent $speaker conversation: $history
 Shared context from $peerName: $peerHistory
