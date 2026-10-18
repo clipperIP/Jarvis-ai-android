@@ -680,10 +680,17 @@ $webContext"""
         }
     }
 
+    private fun removeImpersonatedUserLines(text: String): String {
+        val userLine = Regex("(?i)^\\s*(?:Fynn|Finn|You|User)\\s*:")
+        val filtered = text.lines().filterNot { userLine.containsMatchIn(it) }.joinToString("\n").trim()
+        return filtered.ifBlank { "I got tangled up there, Fynn. Let me try that again — I’m listening." }
+    }
+
     private fun showReply(message: String, reply: String, assistant: String = activeAssistant) {
-        appendConversationLog("Jarvis/Ultron response", reply)
+        val cleanedReply = removeImpersonatedUserLines(reply)
+        appendConversationLog(assistant, cleanedReply)
         val marker = Regex("(?i)(?:\\[\\s*)?(JARVIS|ULTRON)(?:\\s*\\])?\\s*:")
-        val matches = marker.findAll(reply).toList()
+        val matches = marker.findAll(cleanedReply).toList()
         val turns = mutableListOf<Pair<String, String>>()
 
         fun addTurn(who: String, words: String) {
@@ -699,16 +706,16 @@ $webContext"""
             reply.lines().filter { it.isNotBlank() }.forEach { addTurn(assistant, it) }
         } else {
             val first = matches.first()
-            if (first.range.first > 0) addTurn(assistant, reply.substring(0, first.range.first))
+            if (first.range.first > 0) addTurn(assistant, cleanedReply.substring(0, first.range.first))
             matches.forEachIndexed { index, match ->
                 val who = if (match.groupValues[1].equals("ULTRON", ignoreCase = true)) "Ultron" else "Jarvis"
                 val start = match.range.last + 1
-                val end = if (index + 1 < matches.size) matches[index + 1].range.first else reply.length
-                addTurn(who, reply.substring(start, end))
+                val end = if (index + 1 < matches.size) matches[index + 1].range.first else cleanedReply.length
+                addTurn(who, cleanedReply.substring(start, end))
             }
         }
 
-        val safeTurns = turns.filter { it.second.isNotBlank() }.ifEmpty { listOf(assistant to reply.trim()) }
+        val safeTurns = turns.filter { it.second.isNotBlank() }.ifEmpty { listOf(assistant to cleanedReply) }
         speechGeneration++
         val generation = speechGeneration
         stopSpeaking()
