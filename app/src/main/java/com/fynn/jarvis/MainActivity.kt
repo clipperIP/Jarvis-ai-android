@@ -443,10 +443,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 addMemory(cleanMessage.substringAfter("remember ").trim())
                 "Saved to my local memory, Fynn."
             }
+            lower.contains("why can't you have a conversation") || lower.contains("why can't you talk to me") || lower.contains("can't you have a conversation with me") ->
+                "I can talk with you, Fynn. I'm here with you right now. Sorry I gave you that strange, formal answer earlier. What's on your mind?"
             lower.contains("who are you") || lower.contains("your name") ->
-                "I am $speaker, your personal AI assistant."
+                "I am $speaker, your personal AI assistant and friend."
             lower.contains("hello") || lower.contains("hi jarvis") || lower == "hi" ->
-                "Hello, Fynn. How can I help?"
+                "Hey, Fynn! Good to hear from you. What's up?"
             lower.contains("what time") || lower == "time" ->
                 "The current device time is ${SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())}."
             else -> null
@@ -482,6 +484,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
                 val systemPrompt = """$persona
 You are currently speaking as $speaker. Respond only as $speaker in one normal reply.
+You are directly chatting with Fynn inside this app. You absolutely can communicate with him here. Never say you cannot communicate with Fynn, never refer him to official channels, and never treat him as a third party who is not present.
 Treat Fynn as a friend having a real conversation, not as a formal support ticket. Understand the meaning of the latest message and respond to it directly.
 If Fynn makes a casual statement, joke, greeting, or says what he is doing, reply naturally to that statement and keep the conversation going. Do not demand context or say that information was not provided unless a specific essential fact is genuinely missing.
 For example, if Fynn says he is hanging out with Ultron, respond conversationally about hanging out with Ultron; do not say you are hanging out with Fynn, invent a quote from Fynn, or switch into a made-up dialogue.
