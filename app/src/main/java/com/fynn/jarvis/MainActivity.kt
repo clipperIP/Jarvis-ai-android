@@ -154,7 +154,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             inputType = InputType.TYPE_CLASS_TEXT
-            setText(prefs.getString("fish_voice_id", "2b1e19ec57ed4786b75a2d2db74fdcf1") ?: "2b1e19ec57ed4786b75a2d2db74fdcf1")
+            setText(prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         }
         val saveFish = Button(this).apply {
             text = "Save Fish Audio voice"
@@ -382,7 +382,7 @@ User: $message"""
 
     private fun speak(text: String) {
         val key = prefs.getString("fish_api_key", "")?.trim().orEmpty()
-        val voiceId = prefs.getString("fish_voice_id", "2b1e19ec57ed4786b75a2d2db74fdcf1")?.trim().orEmpty()
+        val voiceId = prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe")?.trim().orEmpty()
         if (key.isBlank()) {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
             return
