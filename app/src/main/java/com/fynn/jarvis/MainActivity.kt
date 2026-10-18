@@ -236,13 +236,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val localModel = field("Gemini model (recommended: gemini-2.5-flash)", prefs.getString("local_model", "gemini-2.5-flash") ?: "gemini-2.5-flash")
+        val localModel = field("Gemini model (recommended: gemini-3.8-flash)", prefs.getString("local_model", "gemini-3.8-flash") ?: "gemini-3.8-flash")
         val geminiKey = field("Gemini API key (required)", prefs.getString("gemini_api_key", "") ?: "", true)
         val fishKey = field("Fish Audio API key (optional)", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "Jarvis now uses Google Gemini. Recommended model: gemini-2.5-flash. Enter your Gemini API key below. API usage may be subject to Google AI Studio limits or billing. Fish Audio is optional for voice output."
+            text = "Jarvis now uses Google Gemini. Recommended model: gemini-3.8-flash. Enter your Gemini API key below. API usage may be subject to Google AI Studio limits or billing. Fish Audio is optional for voice output."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
@@ -568,12 +568,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "$speaker is thinking..."
         thread {
             try {
-                val model = prefs.getString("local_model", "gemini-2.5-flash")?.trim().orEmpty().ifBlank { "gemini-2.5-flash" }
+                val model = prefs.getString("local_model", "gemini-3.8-flash")?.trim().orEmpty().ifBlank { "gemini-3.8-flash" }
                 val geminiKey = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
                 if (geminiKey.isBlank()) {
                     throw IllegalStateException("To use Gemini, open Assistant Settings, enter your Gemini API key, and save settings.")
                 }
-                val safeModel = model.removePrefix("models/").ifBlank { "gemini-2.5-flash" }
+                val safeModel = model.removePrefix("models/").ifBlank { "gemini-3.8-flash" }
                 val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$safeModel:generateContent?key=$geminiKey")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
