@@ -473,22 +473,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val peerHistoryKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
                 val peerName = if (speaker.equals("Ultron", ignoreCase = true)) "Jarvis" else "Ultron"
                 val peerHistory = (prefs.getString(peerHistoryKey, "") ?: "").takeLast(450)
+                val liveSearch = if (needsLiveSearch(cleanMessage)) searchWeb(cleanMessage) else ""
+                val webContext = if (liveSearch.isNotBlank()) "Live web results:\n$liveSearch" else if (needsLiveSearch(cleanMessage)) "Live search failed; do not guess current facts." else ""
                 val persona = if (speaker.equals("Ultron", ignoreCase = true)) {
                     "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Cooperate with Jarvis using the shared conversation context. Do not threaten Fynn or claim to control devices."
                 } else {
                     "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
-                val prompt = """$persona Answer clearly and quickly. This is a local model without live web access. Never invent current scores, news, weather, prices, or recent facts. If Fynn asks for something current, be honest that live search is not connected. Keep ordinary answers concise. The user's saved local facts are:
-$facts
-
-Recent conversation with $speaker:
-$history
-
-Recent shared context from $peerName:
-$peerHistory
-
-You are friendly teammates sharing a conversation. Normally answer as $speaker. When genuinely useful, you may add a short back-and-forth with the other assistant using separate lines prefixed [JARVIS]: or [ULTRON]:, with up to three total lines. Let them correct each other naturally, but do not force disagreement.
-
+                val prompt = """$persona Be fast and concise. Use the supplied live web results for current questions. Never invent current facts when results are missing. Saved facts: $facts
+Recent $speaker conversation: $history
+Shared context from $peerName: $peerHistory
+$webContext
+Normally answer as $speaker. Use [JARVIS]: or [ULTRON]: extra dialogue only when helpful, no more than two short lines.
 User: $cleanMessage"""
                 val body = JSONObject()
                     .put("model", model)
