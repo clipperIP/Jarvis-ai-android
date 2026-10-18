@@ -197,18 +197,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val groqKey = field("Groq API key (free tier)", prefs.getString("groq_api_key", "") ?: "", true)
-        val fishKey = field("Fish Audio API key", prefs.getString("fish_api_key", "") ?: "", true)
+        val localModel = field("Local Ollama model name", prefs.getString("local_model", "qwen2.5:0.5b") ?: "qwen2.5:0.5b")
+        val fishKey = field("Fish Audio API key (optional)", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "Groq powers the AI and live web search. Keys and voice IDs are saved on this device."
+            text = "AI runs locally through Ollama in Termux. No cloud AI API quota. Start Ollama in Termux before chatting. Fish Audio is optional; Android speech is used if it is blank."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
         }
         panel.addView(help, matchWrap())
-        panel.addView(groqKey, matchWrap())
+        panel.addView(localModel, matchWrap())
         panel.addView(fishKey, matchWrap())
         panel.addView(jarvisVoice, matchWrap())
         panel.addView(ultronVoice, matchWrap())
@@ -218,17 +218,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .setView(scroll)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save settings") { _, _ ->
-                val gKey = groqKey.text.toString().trim()
+                val model = localModel.text.toString().trim()
                 val fKey = fishKey.text.toString().trim()
                 val jVoice = jarvisVoice.text.toString().trim()
                 val uVoice = ultronVoice.text.toString().trim()
-                if (gKey.isBlank() || fKey.isBlank() || jVoice.isBlank() || uVoice.isBlank()) {
-                    status.text = "Settings not saved. Fill in all four fields first."
+                if (model.isBlank() || jVoice.isBlank() || uVoice.isBlank()) {
+                    status.text = "Settings not saved. Enter a model name and both voice IDs."
                     return@setPositiveButton
                 }
-                prefs.edit().putString("groq_api_key", gKey).putString("fish_api_key", fKey)
+                prefs.edit().putString("local_model", model).putString("fish_api_key", fKey)
                     .putString("fish_voice_id", jVoice).putString("ultron_voice_id", uVoice).apply()
-                status.text = "Settings saved on this device."
+                status.text = "Local AI settings saved."
             }
             .show()
     }
@@ -393,24 +393,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             showReply(cleanMessage, localReply, speaker)
             return
         }
-        val key = prefs.getString("groq_api_key", "")?.trim().orEmpty()
-        if (key.isBlank()) {
-            val reply = "My AI brain needs a Groq API key. Open Settings with the gear button and add one from console.groq.com."
-            showReply(cleanMessage, reply, speaker)
-            return
-        }
         status.text = "$speaker is thinking..."
         thread {
             try {
-                val currentInfoQuestion = Regex("(?i)\\b(current|latest|today|tonight|yesterday|score|game|match|weather|news|price|released|release date|schedule|standings|recent|this week|last game|last night|right now|up to date|who won)\\b").containsMatchIn(cleanMessage)
-                val url = URL("https://api.groq.com/openai/v1/responses")
+                val model = prefs.getString("local_model", "qwen2.5:0.5b")?.trim().orEmpty().ifBlank { "qwen2.5:0.5b" }
+                val url = URL("http://127.0.0.1:11434/api/chat")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 12000
-                    readTimeout = 45000
+                    connectTimeout = 5000
+                    readTimeout = 120000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("Authorization", "Bearer $key")
                 }
                 val facts = (prefs.getString("facts", "") ?: "").takeLast(2000)
                 val historyKey = if (speaker.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
@@ -423,7 +416,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 } else {
                     "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
-                val prompt = """$persona Answer the user's actual question clearly and quickly. For current events, sports scores/schedules, weather, prices, news, recent releases, or anything that may have changed, use the available live browser search and base the answer on current results. Never guess a current fact or claim an old event is the latest. If search cannot verify it, say so briefly. Keep ordinary answers concise. The user's saved local facts are:
+                val prompt = """$persona Answer clearly and quickly. This is a local model without live web access. Never invent current scores, news, weather, prices, or recent facts. If Fynn asks for something current, be honest that live search is not connected. Keep ordinary answers concise. The user's saved local facts are:
 $facts
 
 Recent conversation with $speaker:
@@ -436,53 +429,32 @@ You are friendly teammates sharing a conversation. Normally answer as $speaker. 
 
 User: $cleanMessage"""
                 val body = JSONObject()
-                    .put("model", "openai/gpt-oss-20b")
-                    .put("input", prompt)
-                    .put("max_output_tokens", 350)
-                    .put("reasoning", JSONObject().put("effort", "low"))
-                if (currentInfoQuestion) {
-                    body.put("tools", JSONArray().put(JSONObject().put("type", "browser_search")))
-                    body.put("tool_choice", "required")
-                }
+                    .put("model", model)
+                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+                    .put("stream", false)
+                    .put("options", JSONObject().put("temperature", 0.5).put("num_predict", 350))
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 connection.disconnect()
                 if (code !in 200..299) {
-                    val apiMessage = runCatching { JSONObject(responseText).getJSONObject("error").optString("message") }.getOrNull()
-                    throw IllegalStateException("Groq API returned HTTP $code: ${apiMessage ?: "Check your Groq API key and usage limits."}")
+                    throw IllegalStateException("Local Ollama returned HTTP $code. Start Ollama in Termux and check that the configured model is installed.")
                 }
                 val json = JSONObject(responseText)
-                val output = json.optJSONArray("output") ?: JSONArray()
-                val answerParts = mutableListOf<String>()
-                for (i in 0 until output.length()) {
-                    val item = output.optJSONObject(i) ?: continue
-                    if (item.optString("type") != "message" || item.optString("role") != "assistant") continue
-                    val contentParts = item.optJSONArray("content") ?: continue
-                    for (j in 0 until contentParts.length()) {
-                        val part = contentParts.optJSONObject(j) ?: continue
-                        if (part.optString("type") == "output_text") {
-                            val text = part.optString("text").trim()
-                            if (text.isNotBlank()) answerParts.add(text)
-                        }
-                    }
-                }
-                val reply = answerParts.joinToString("\n").trim()
-                if (reply.isBlank()) throw IllegalStateException("Groq returned an empty answer. Try again.")
+                val reply = json.getJSONObject("message").getString("content").trim()
                 runOnUiThread {
-                    val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
+                    val updatedHistory = (history + "\\nUser: " + cleanMessage + "\\n" + speaker + ": " + reply).takeLast(6000)
                     val peerKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
-                    val peerHistory = prefs.getString(peerKey, "") ?: ""
-                    val sharedTurn = "\nFynn said to " + speaker + ": " + cleanMessage + "\n" + speaker + ": " + reply
-                    prefs.edit().putString(historyKey, updatedHistory).putString(peerKey, (peerHistory + sharedTurn).takeLast(6000)).apply()
+                    val previousPeerHistory = prefs.getString(peerKey, "") ?: ""
+                    val sharedTurn = "\\nFynn said to " + speaker + ": " + cleanMessage + "\\n" + speaker + ": " + reply
+                    prefs.edit().putString(historyKey, updatedHistory).putString(peerKey, (previousPeerHistory + sharedTurn).takeLast(6000)).apply()
                     showReply(cleanMessage, reply, speaker)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    val reason = e.message ?: "Network or API error."
-                    val reply = "I couldn't reach my AI brain. $reason"
-                    showReply(message, reply)
+                    val reply = "I couldn't reach the local AI. Open Termux and run 'ollama serve', then make sure the configured model is installed. Details: ${e.message ?: "connection failed"}"
+                    showReply(message, reply, speaker)
                 }
             }
         }
