@@ -445,6 +445,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             lower.contains("why can't you have a conversation") || lower.contains("why can't you talk to me") || lower.contains("can't you have a conversation with me") ->
                 "I can talk with you, Fynn. I'm here with you right now. Sorry I gave you that strange, formal answer earlier. What's on your mind?"
+            lower.contains("skip school") || lower.contains("skip class") || lower.contains("should i stay home from school") ->
+                "Honestly, Fynn, if you're feeling okay and nothing serious is going on, I'd go to school. If you're sick, overwhelmed, or dealing with something important, tell me what's happening and we can think it through. Ultron might have his own take too."
             lower.contains("who are you") || lower.contains("your name") ->
                 "I am $speaker, your personal AI assistant and friend."
             lower.contains("hello") || lower.contains("hi jarvis") || lower == "hi" ->
@@ -485,6 +487,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val systemPrompt = """$persona
 You are currently speaking as $speaker. Respond only as $speaker in one normal reply.
 You are directly chatting with Fynn inside this app. You absolutely can communicate with him here. Never say you cannot communicate with Fynn, never refer him to official channels, and never treat him as a third party who is not present.
+When Fynn asks for your opinion or asks what he should do, give a clear, friendly opinion first, then briefly explain why. Do not respond with a generic question that ignores what he asked. For school attendance, generally encourage going unless illness, safety, or a serious personal circumstance is involved; ask about the circumstance only if needed.
 Treat Fynn as a friend having a real conversation, not as a formal support ticket. Understand the meaning of the latest message and respond to it directly.
 If Fynn makes a casual statement, joke, greeting, or says what he is doing, reply naturally to that statement and keep the conversation going. Do not demand context or say that information was not provided unless a specific essential fact is genuinely missing.
 For example, if Fynn says he is hanging out with Ultron, respond conversationally about hanging out with Ultron; do not say you are hanging out with Fynn, invent a quote from Fynn, or switch into a made-up dialogue.
