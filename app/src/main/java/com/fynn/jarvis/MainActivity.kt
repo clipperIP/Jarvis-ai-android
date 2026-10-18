@@ -236,18 +236,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val localModel = field("Local Ollama model name", prefs.getString("local_model", "qwen2.5:0.5b") ?: "qwen2.5:0.5b")
+        val localModel = field("AI model (qwen2.5:0.5b or gpt-4o-mini)", prefs.getString("local_model", "qwen2.5:0.5b") ?: "qwen2.5:0.5b")
+        val openAiKey = field("OpenAI API key (needed for GPT models)", prefs.getString("openai_api_key", "") ?: "", true)
         val fishKey = field("Fish Audio API key (optional)", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "AI runs locally through Ollama in Termux. No cloud AI API quota. Start Ollama in Termux before chatting. Fish Audio is optional; Android speech is used if it is blank."
+            text = "Use qwen2.5:0.5b for local Ollama (Termux must be running), or gpt-4o-mini for OpenAI GPT (requires your OpenAI API key and may cost money). Fish Audio is optional for voice output."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
         }
         panel.addView(help, matchWrap())
         panel.addView(localModel, matchWrap())
+        panel.addView(openAiKey, matchWrap())
         panel.addView(fishKey, matchWrap())
         panel.addView(jarvisVoice, matchWrap())
         panel.addView(ultronVoice, matchWrap())
@@ -265,8 +267,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     status.text = "Settings not saved. Enter a model name and both voice IDs."
                     return@setPositiveButton
                 }
-                prefs.edit().putString("local_model", model).putString("fish_api_key", fKey)
-                    .putString("fish_voice_id", jVoice).putString("ultron_voice_id", uVoice).apply()
+                prefs.edit().putString("local_model", model).putString("openai_api_key", openAiKey.text.toString().trim())
+                    .putString("fish_api_key", fKey).putString("fish_voice_id", jVoice)
+                    .putString("ultron_voice_id", uVoice).apply()
                 status.text = "Local AI settings saved."
             }
             .show()
