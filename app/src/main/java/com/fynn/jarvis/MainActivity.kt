@@ -901,13 +901,17 @@ $webContext"""
                             setOnErrorListener { player, _, _ ->
                                 player.release()
                                 if (fishPlayer === player) fishPlayer = null
-                                onComplete?.invoke()
+                                status.text = "Fish Audio playback failed. Switching to device voice."
+                                speakWithSystemVoice(text, assistant, onComplete)
                                 true
                             }
                             prepareAsync()
                         }
                     } catch (e: Exception) {
-                        status.text = "Fish Audio playback failed: ${e.message ?: "unknown error"}"
+                        runOnUiThread {
+                            status.text = "Fish Audio playback failed. Switching to device voice."
+                            speakWithSystemVoice(text, assistant, onComplete)
+                        }
                     }
                 }
             } catch (e: Exception) {
