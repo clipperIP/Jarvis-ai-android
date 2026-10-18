@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Handler
@@ -39,13 +40,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var recognizer: SpeechRecognizer? = null
     private lateinit var status: TextView
     private lateinit var transcript: TextView
+    private lateinit var orb: TextView
+    private var activeAssistant = "Jarvis"
     private lateinit var input: EditText
     private lateinit var apiKeyInput: EditText
     private lateinit var fishApiKeyInput: EditText
     private lateinit var fishVoiceInput: EditText
     private var fishPlayer: MediaPlayer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var handsFreeEnabled = false
     private lateinit var memoryView: TextView
     private val prefs by lazy { getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE) }
     private val requestAudio = 42
@@ -64,8 +66,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(24, 32, 24, 24)
-            setBackgroundColor(Color.rgb(10, 17, 30))
+            setPadding(22, 24, 22, 20)
+            setBackgroundColor(Color.rgb(5, 10, 20))
         }
         val scroll = ScrollView(this)
         val content = LinearLayout(this).apply {
@@ -73,11 +75,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val title = TextView(this).apply {
-            text = "J.A.R.V.I.S."
-            textSize = 30f
-            setTextColor(Color.rgb(95, 210, 255))
+            text = "A . I   C O R E"
+            textSize = 13f
+            letterSpacing = 0.22f
+            setTextColor(Color.rgb(100, 205, 255))
             gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 8)
+            setPadding(0, 10, 0, 4)
         }
         status = TextView(this).apply {
             text = "Systems starting..."
@@ -86,30 +89,40 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER
             setPadding(0, 8, 0, 20)
         }
-        transcript = TextView(this).apply {
-            text = "Tap the microphone and speak to Jarvis."
-            textSize = 17f
-            setTextColor(Color.LTGRAY)
-            setPadding(0, 12, 0, 16)
-        }
-        val mic = Button(this).apply {
-            text = "TALK TO JARVIS"
+        orb = TextView(this).apply {
+            text = "J"
+            textSize = 68f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = makeOrbDrawable(false)
+            elevation = 10f
             setOnClickListener { listen() }
         }
-        val handsFree = Button(this).apply {
-            text = "ENABLE HANDS-FREE MODE"
-            setOnClickListener {
-                handsFreeEnabled = !handsFreeEnabled
-                text = if (handsFreeEnabled) "HANDS-FREE MODE: ON (TAP TO STOP)" else "ENABLE HANDS-FREE MODE"
-                if (handsFreeEnabled) {
-                    status.text = "Hands-free mode on. Speak after Jarvis finishes talking."
-                    listen()
-                } else {
-                    mainHandler.removeCallbacksAndMessages(null)
-                    recognizer?.cancel()
-                    status.text = "Hands-free mode off."
-                }
-            }
+        val orbParams = LinearLayout.LayoutParams(dp(224), dp(224)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(30)
+            bottomMargin = dp(18)
+        }
+        val assistantPicker = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val jarvisSelect = Button(this).apply {
+            text = "JARVIS"
+            setOnClickListener { selectAssistant("Jarvis") }
+        }
+        val ultronSelect = Button(this).apply {
+            text = "ULTRON"
+            setOnClickListener { selectAssistant("Ultron") }
+        }
+        assistantPicker.addView(jarvisSelect, LinearLayout.LayoutParams(0, dp(48), 1f))
+        assistantPicker.addView(ultronSelect, LinearLayout.LayoutParams(0, dp(48), 1f))
+        transcript = TextView(this).apply {
+            text = "Tap the blue core to speak."
+            textSize = 16f
+            setTextColor(Color.rgb(205, 220, 235))
+            gravity = Gravity.CENTER
+            setPadding(8, 18, 8, 18)
         }
         input = EditText(this).apply {
             hint = "Type a message or a fact to remember..."
@@ -211,9 +224,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         content.addView(title, matchWrap())
         content.addView(status, matchWrap())
+        content.addView(orb, orbParams)
+        content.addView(assistantPicker, matchWrap())
         content.addView(transcript, matchWrap())
-        content.addView(mic, matchWrap())
-        content.addView(handsFree, matchWrap())
         content.addView(input, matchWrap())
         content.addView(send, matchWrap())
         content.addView(aiTitle, matchWrap())
@@ -272,8 +285,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() { status.text = "Thinking..." }
             override fun onError(error: Int) {
-                status.text = if (handsFreeEnabled) "Didn't catch that. Listening again..." else "Didn't catch that. Tap the microphone to try again."
-                if (handsFreeEnabled) scheduleNextListen(1200)
+                status.text = "Didn't catch that. Tap the blue core and try again."
             }
             override fun onResults(results: Bundle?) {
                 val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
@@ -357,10 +369,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         return if (exact.isNotEmpty()) exact else found
     }
 
-    private fun handleMessage(message: String) {
+    private fun handleMessage(message: String, assistant: String = activeAssistant) {
         val contactReply = handleContactCommand(message)
         if (contactReply != null) {
-            showReply(message, contactReply)
+            showReply(message, contactReply, assistant)
             return
         }
         val lower = message.lowercase(Locale.ROOT)
@@ -384,7 +396,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else -> null
         }
         if (localReply != null) {
-            showReply(message, localReply)
+            showReply(message, localReply, assistant)
             return
         }
         val key = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
@@ -393,7 +405,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             showReply(message, reply)
             return
         }
-        status.text = "Jarvis is thinking..."
+        status.text = "$assistant is thinking..."
         thread {
             try {
                 val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent")
@@ -406,11 +418,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     setRequestProperty("x-goog-api-key", key)
                 }
                 val facts = prefs.getString("facts", "") ?: ""
-                val history = prefs.getString("chat_history", "") ?: ""
-                val prompt = """You are J.A.R.V.I.S., Fynn's personal voice assistant. Be natural, friendly, direct, useful, and conversational. Answer the user's actual question; never repeat setup/status text unless asked. The user's saved local facts are:
+                val historyKey = if (assistant.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
+                val history = prefs.getString(historyKey, "") ?: ""
+                val persona = if (assistant.equals("Ultron", ignoreCase = true)) {
+                    "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Do not threaten Fynn or claim to control devices."
+                } else {
+                    "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational."
+                }
+                val prompt = """$persona Answer the user's actual question; never repeat setup/status text unless asked. The user's saved local facts are:
 $facts
 
-Recent conversation:
+Recent conversation with $assistant:
 $history
 
 User: $message"""
@@ -430,9 +448,9 @@ User: $message"""
                 val reply = json.getJSONArray("candidates").getJSONObject(0)
                     .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
                 runOnUiThread {
-                    val updatedHistory = (history + "\nUser: " + message + "\nJarvis: " + reply).takeLast(6000)
-                    prefs.edit().putString("chat_history", updatedHistory).apply()
-                    showReply(message, reply)
+                    val updatedHistory = (history + "\nUser: " + message + "\n" + assistant + ": " + reply).takeLast(6000)
+                    prefs.edit().putString(historyKey, updatedHistory).apply()
+                    showReply(message, reply, assistant)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -444,22 +462,31 @@ User: $message"""
         }
     }
 
-    private fun showReply(message: String, reply: String) {
-        transcript.text = "You: $message\n\nJarvis: $reply"
-        status.text = if (handsFreeEnabled) "Jarvis is replying. I'll listen again afterward." else "Ready, Fynn."
-        speak(reply)
-        if (handsFreeEnabled) {
-            // Estimate speech duration so the microphone doesn't restart over Jarvis's reply.
-            scheduleNextListen((reply.length * 75L + 1800L).coerceIn(3500L, 30000L))
+    private fun showReply(message: String, reply: String, assistant: String = activeAssistant) {
+        selectAssistant(assistant)
+        transcript.text = "YOU\n$message\n\n$assistant\n$reply"
+        status.text = "$assistant is replying..."
+        speak(reply, assistant)
+    }
+
+    private fun selectAssistant(name: String) {
+        activeAssistant = name
+        val isUltron = name.equals("Ultron", ignoreCase = true)
+        orb.text = if (isUltron) "U" else "J"
+        orb.background = makeOrbDrawable(isUltron)
+        status.text = if (isUltron) "ULTRON • READY" else "JARVIS • READY"
+    }
+
+    private fun makeOrbDrawable(isUltron: Boolean): GradientDrawable {
+        val color = if (isUltron) Color.rgb(255, 58, 68) else Color.rgb(45, 180, 255)
+        return GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.rgb(9, 22, 40))
+            setStroke(dp(4), color)
         }
     }
 
-    private fun scheduleNextListen(delayMs: Long) {
-        mainHandler.removeCallbacksAndMessages(null)
-        mainHandler.postDelayed({
-            if (handsFreeEnabled && !isFinishing && !isDestroyed) listen()
-        }, delayMs)
-    }
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun rememberFromInput() {
         val fact = input.text.toString().trim()
@@ -489,11 +516,16 @@ User: $message"""
         }
     }
 
-    private fun speak(text: String) {
+    private fun speak(text: String, assistant: String = "Jarvis") {
         val key = prefs.getString("fish_api_key", "")?.trim().orEmpty()
-        val voiceId = prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe")?.trim().orEmpty()
+        val voiceId = if (assistant.equals("Ultron", ignoreCase = true)) {
+            prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf")?.trim().orEmpty()
+        } else {
+            prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe")?.trim().orEmpty()
+        }
+        runOnUiThread { selectAssistant(assistant) }
         if (key.isBlank()) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "${assistant.lowercase(Locale.ROOT)}_reply")
             return
         }
         thread {
@@ -519,7 +551,7 @@ User: $message"""
                     val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty().take(300)
                     throw IllegalStateException("Fish Audio HTTP $code: $detail")
                 }
-                val audioFile = File(cacheDir, "jarvis_fish_reply.mp3")
+                val audioFile = File(cacheDir, if (assistant.equals("Ultron", ignoreCase = true)) "ultron_fish_reply.mp3" else "jarvis_fish_reply.mp3")
                 connection.inputStream.use { inputStream ->
                     audioFile.outputStream().use { outputStream -> inputStream.copyTo(outputStream) }
                 }
@@ -547,7 +579,7 @@ User: $message"""
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "Fish Audio voice unavailable: ${e.message ?: "check API key and voice ID"}"
-                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply_fallback")
+                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "${assistant.lowercase(Locale.ROOT)}_reply_fallback")
                 }
             } finally {
                 connection?.disconnect()
