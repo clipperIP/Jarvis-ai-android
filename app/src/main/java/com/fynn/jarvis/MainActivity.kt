@@ -406,16 +406,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val facts = prefs.getString("facts", "") ?: ""
                 val historyKey = if (assistant.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
                 val history = prefs.getString(historyKey, "") ?: ""
+                val peerHistoryKey = if (assistant.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
+                val peerName = if (assistant.equals("Ultron", ignoreCase = true)) "Jarvis" else "Ultron"
+                val peerHistory = prefs.getString(peerHistoryKey, "") ?: ""
                 val persona = if (assistant.equals("Ultron", ignoreCase = true)) {
-                    "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Do not threaten Fynn or claim to control devices."
+                    "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Cooperate with Jarvis using the shared conversation context. Do not threaten Fynn or claim to control devices."
                 } else {
-                    "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational."
+                    "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
                 val prompt = """$persona Answer the user's actual question; never repeat setup/status text unless asked. The user's saved local facts are:
 $facts
 
 Recent conversation with $assistant:
 $history
+
+Recent shared context from $peerName:
+$peerHistory
 
 User: $message"""
                 val body = JSONObject()
