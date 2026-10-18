@@ -55,6 +55,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var speechGeneration = 0
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var memoryView: TextView
+    private val conversationLogFile by lazy { File(filesDir, "conversation_log.txt") }
     private val prefs by lazy { getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE) }
     private val requestAudio = 42
     private val requestContacts = 43
@@ -166,6 +167,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
         }
+        val logButton = Button(this).apply {
+            text = "VIEW CONVERSATION LOG"
+            setOnClickListener { showConversationLog() }
+        }
         val memoryTitle = TextView(this).apply {
             text = "LOCAL MEMORY"
             textSize = 14f
@@ -206,6 +211,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         content.addView(transcript, matchWrap())
         content.addView(input, matchWrap())
         content.addView(send, matchWrap())
+        content.addView(logButton, matchWrap())
         content.addView(memoryTitle, matchWrap())
         content.addView(memoryView, matchWrap())
         content.addView(saveMemory, matchWrap())
@@ -460,6 +466,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun handleMessage(message: String, assistant: String = activeAssistant) {
+        appendConversationLog("Fynn", message)
         val mentionsUltron = Regex("(?i)\\b(?:hey\\s+)?ultron\\b").containsMatchIn(message)
         val mentionsJarvis = Regex("(?i)\\b(?:hey\\s+)?jarvis\\b").containsMatchIn(message)
         val bothRequested = mentionsUltron && mentionsJarvis
@@ -529,6 +536,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     setRequestProperty("Content-Type", "application/json")
                 }
                 val facts = (prefs.getString("facts", "") ?: "").takeLast(900)
+                val fullConversationMemory = readRecentConversationLog(6000)
                 val historyKey = if (speaker.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
                 val history = (prefs.getString(historyKey, "") ?: "").takeLast(1000)
                 val peerHistoryKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
@@ -559,6 +567,7 @@ For questions, answer the actual question first. Use supplied live web results f
 Be genuinely thoughtful and alert to trick questions, riddles, misleading wording, false assumptions, sarcasm, and wordplay. Read the exact wording carefully before answering; do not rush to accept a premise just because Fynn states it. If a question is ambiguous, briefly explain the likely interpretations or ask one focused clarification. Check simple arithmetic and logical steps instead of guessing. Separate known facts from assumptions, admit uncertainty when appropriate, and correct mistakes plainly. Do not claim to know everything or fabricate details.
 Use the device-local date and weekday provided above for words like today, tomorrow, yesterday, and this weekend. For school questions, account for the actual weekday first; weekends usually mean no regular school, while recognizing special classes or events can exist. Do not treat a generic school-day assumption as more reliable than the live calendar.
 Saved facts: $facts
+Recent full conversation log (most recent turns; use this to remember prior context): $fullConversationMemory
 Recent $speaker conversation: $history
 Shared context from $peerName: $peerHistory
 $webContext"""
@@ -598,6 +607,7 @@ $webContext"""
     }
 
     private fun showReply(message: String, reply: String, assistant: String = activeAssistant) {
+        appendConversationLog("Jarvis/Ultron response", reply)
         val marker = Regex("(?i)(?:\\[\\s*)?(JARVIS|ULTRON)(?:\\s*\\])?\\s*:")
         val matches = marker.findAll(reply).toList()
         val turns = mutableListOf<Pair<String, String>>()
@@ -677,6 +687,48 @@ $webContext"""
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun appendConversationLog(speaker: String, message: String) {
+        if (message.isBlank()) return
+        synchronized(conversationLogFile) {
+            try {
+                conversationLogFile.parentFile?.mkdirs()
+                conversationLogFile.appendText(
+                    "[${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}] $speaker: $message\n",
+                    Charsets.UTF_8
+                )
+            } catch (_: Exception) {
+                // Keep the assistant usable even if local logging is unavailable.
+            }
+        }
+    }
+
+    private fun readRecentConversationLog(maxChars: Int): String {
+        return synchronized(conversationLogFile) {
+            try {
+                if (!conversationLogFile.exists()) "" else conversationLogFile.readText(Charsets.UTF_8).takeLast(maxChars)
+            } catch (_: Exception) {
+                ""
+            }
+        }
+    }
+
+    private fun showConversationLog() {
+        val log = readRecentConversationLog(20000).ifBlank { "No conversations have been logged yet." }
+        AlertDialog.Builder(this)
+            .setTitle("Conversation log (stored on this device)")
+            .setMessage(log)
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Clear log") { _, _ ->
+                try {
+                    conversationLogFile.writeText("", Charsets.UTF_8)
+                    status.text = "Conversation log cleared."
+                } catch (_: Exception) {
+                    status.text = "Couldn't clear the conversation log."
+                }
+            }
+            .show()
+    }
 
     private fun rememberFromInput() {
         val fact = input.text.toString().trim()
