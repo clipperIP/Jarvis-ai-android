@@ -482,8 +482,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
                 val systemPrompt = """$persona
 You are currently speaking as $speaker. Respond only as $speaker in one normal reply.
+Treat Fynn as a friend having a real conversation, not as a formal support ticket. Understand the meaning of the latest message and respond to it directly.
+If Fynn makes a casual statement, joke, greeting, or says what he is doing, reply naturally to that statement and keep the conversation going. Do not demand context or say that information was not provided unless a specific essential fact is genuinely missing.
+For example, if Fynn says he is hanging out with Ultron, respond conversationally about hanging out with Ultron; do not say you are hanging out with Fynn, invent a quote from Fynn, or switch into a made-up dialogue.
 Do not write a conversation or roleplay both assistants. Do not add character labels or a second character dialogue unless Fynn explicitly asks for both assistants.
-Answer the actual question first. Use supplied live web results for current facts. If results do not contain the answer, say you could not verify it rather than making it up. Be natural, concise, and avoid unrelated greetings.
+For questions, answer the actual question first. Use supplied live web results for current facts. If results do not contain the answer to a current-facts question, say you could not verify it rather than making it up. Be concise, friendly, and avoid unrelated greetings.
 Saved facts: $facts
 Recent $speaker conversation: $history
 Shared context from $peerName: $peerHistory
