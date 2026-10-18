@@ -44,6 +44,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var transcript: TextView
     private lateinit var orb: TextView
     private var activeAssistant = "Jarvis"
+    private var handsFreeEnabled = false
+    private lateinit var handsFreeButton: Button
     private lateinit var input: EditText
     private var fishPlayer: MediaPlayer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -55,9 +57,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this, this)
+        handsFreeEnabled = prefs.getBoolean("hands_free_enabled", false)
         buildUi()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), requestAudio)
+        } else if (handsFreeEnabled) {
+            scheduleNextListen(900)
         }
     }
 
@@ -170,6 +175,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         content.addView(status, matchWrap())
         content.addView(orb, orbParams)
         content.addView(assistantPicker, matchWrap())
+        handsFreeButton = Button(this).apply {
+            text = if (handsFreeEnabled) "HANDS-FREE MODE: ON - TAP TO STOP" else "ENABLE HANDS-FREE MODE"
+            setOnClickListener { setHandsFree(!handsFreeEnabled) }
+        }
+        content.addView(handsFreeButton, matchWrap())
         content.addView(transcript, matchWrap())
         content.addView(input, matchWrap())
         content.addView(send, matchWrap())
@@ -251,6 +261,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         } else {
             status.text = "Speech output could not start. You can still type."
         }
+    }
+
+    private fun setHandsFree(enabled: Boolean) {
+        handsFreeEnabled = enabled
+        prefs.edit().putBoolean("hands_free_enabled", enabled).apply()
+        if (::handsFreeButton.isInitialized) handsFreeButton.text = if (enabled) "HANDS-FREE MODE: ON - TAP TO STOP" else "ENABLE HANDS-FREE MODE"
+        if (enabled) {
+            status.text = "Hands-free on. I will listen again after each reply while Jarvis is open."
+            listen()
+        } else {
+            mainHandler.removeCallbacksAndMessages(null)
+            recognizer?.cancel()
+            status.text = "Hands-free mode off."
+        }
+    }
+
+    private fun scheduleNextListen(delayMs: Long) {
+        mainHandler.removeCallbacksAndMessages(null)
+        mainHandler.postDelayed({
+            if (handsFreeEnabled && !isFinishing && !isDestroyed) listen()
+        }, delayMs)
     }
 
     private fun listen() {
