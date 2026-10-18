@@ -280,9 +280,7 @@ User: $message"""
                 val reply = json.getJSONArray("candidates").getJSONObject(0)
                     .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
                 runOnUiThread {
-                    val updatedHistory = (history + "
-User: " + message + "
-Jarvis: " + reply).takeLast(6000)
+                    val updatedHistory = (history + "\nUser: " + message + "\nJarvis: " + reply).takeLast(6000)
                     prefs.edit().putString("chat_history", updatedHistory).apply()
                     showReply(message, reply)
                 }
