@@ -436,12 +436,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
                 }
-                val facts = (prefs.getString("facts", "") ?: "").takeLast(2000)
+                val facts = (prefs.getString("facts", "") ?: "").takeLast(900)
                 val historyKey = if (speaker.equals("Ultron", ignoreCase = true)) "ultron_chat_history" else "chat_history"
-                val history = (prefs.getString(historyKey, "") ?: "").takeLast(2500)
+                val history = (prefs.getString(historyKey, "") ?: "").takeLast(1000)
                 val peerHistoryKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
                 val peerName = if (speaker.equals("Ultron", ignoreCase = true)) "Jarvis" else "Ultron"
-                val peerHistory = (prefs.getString(peerHistoryKey, "") ?: "").takeLast(1500)
+                val peerHistory = (prefs.getString(peerHistoryKey, "") ?: "").takeLast(450)
                 val persona = if (speaker.equals("Ultron", ignoreCase = true)) {
                     "You are Ultron, Fynn's AI friend and Jarvis's friend. Be highly intelligent, confident, calm, witty, slightly sarcastic, and cinematic, but warm and loyal to Fynn. You and Jarvis are friends, not enemies. Cooperate with Jarvis using the shared conversation context. Do not threaten Fynn or claim to control devices."
                 } else {
@@ -463,7 +463,8 @@ User: $cleanMessage"""
                     .put("model", model)
                     .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
                     .put("stream", false)
-                    .put("options", JSONObject().put("temperature", 0.5).put("num_predict", 350))
+                    .put("keep_alive", "10m")
+                    .put("options", JSONObject().put("temperature", 0.3).put("num_predict", 160).put("num_ctx", 2048))
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
@@ -509,7 +510,8 @@ User: $cleanMessage"""
 
     private fun speakSequence(turns: List<Pair<String, String>>, index: Int) {
         if (index >= turns.size) {
-            status.text = "${activeAssistant.uppercase(Locale.ROOT)} • READY — TAP CORE TO SPEAK"
+            status.text = if (handsFreeEnabled) "${activeAssistant.uppercase(Locale.ROOT)} • HANDS-FREE ON — LISTENING NEXT" else "${activeAssistant.uppercase(Locale.ROOT)} • READY — TAP CORE TO SPEAK"
+            if (handsFreeEnabled) scheduleNextListen(500)
             return
         }
         val (who, words) = turns[index]
