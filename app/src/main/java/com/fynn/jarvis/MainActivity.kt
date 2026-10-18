@@ -423,7 +423,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 } else {
                     "You are J.A.R.V.I.S., Fynn's personal voice assistant and friend. Be natural, friendly, direct, useful, and conversational. Ultron is your friend and teammate, not your rival. Cooperate with him using the shared conversation context."
                 }
-                val prompt = """$persona Answer the user's actual question clearly and quickly. For current events, sports scores/schedules, weather, prices, news, recent releases, or anything that may have changed, use Google Search grounding and base the answer on current results. Never guess a current fact or claim an old event is the latest. If search cannot verify it, say so briefly. Keep ordinary answers concise. The user's saved local facts are:
+                val prompt = """$persona Answer the user's actual question clearly and quickly. For current events, sports scores/schedules, weather, prices, news, recent releases, or anything that may have changed, use the available live browser search and base the answer on current results. Never guess a current fact or claim an old event is the latest. If search cannot verify it, say so briefly. Keep ordinary answers concise. The user's saved local facts are:
 $facts
 
 Recent conversation with $speaker:
@@ -468,7 +468,7 @@ User: $cleanMessage"""
                         }
                     }
                 }
-                val reply = answerParts.joinToString("\\n").trim()
+                val reply = answerParts.joinToString("\n").trim()
                 if (reply.isBlank()) throw IllegalStateException("Groq returned an empty answer. Try again.")
                 runOnUiThread {
                     val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
