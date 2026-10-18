@@ -49,10 +49,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var activeAssistant = "Jarvis"
     private var handsFreeEnabled = false
     private lateinit var handsFreeButton: Button
+    private lateinit var interruptButton: Button
     private lateinit var input: EditText
     private var fishPlayer: MediaPlayer? = null
-    private var bargeInRecognizer: SpeechRecognizer? = null
-    private var currentlySpeaking = false
     private var speechGeneration = 0
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var memoryView: TextView
@@ -120,7 +119,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             elevation = 10f
             setOnClickListener {
                 speechGeneration++
-                currentlySpeaking = false
+                mainHandler.removeCallbacksAndMessages(null)
                 stopSpeaking()
                 listen()
             }
@@ -191,6 +190,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { setHandsFree(!handsFreeEnabled) }
         }
         content.addView(handsFreeButton, matchWrap())
+        interruptButton = Button(this).apply {
+            text = "INTERRUPT & SPEAK"
+            contentDescription = "Stop the assistant's current speech and listen for a new message"
+            setOnClickListener {
+                speechGeneration++
+                mainHandler.removeCallbacksAndMessages(null)
+                stopSpeaking()
+                recognizer?.cancel()
+                status.text = "Interrupted. Listening to you, Fynn..."
+                listen()
+            }
+        }
+        content.addView(interruptButton, matchWrap())
         content.addView(transcript, matchWrap())
         content.addView(input, matchWrap())
         content.addView(send, matchWrap())
@@ -615,10 +627,7 @@ $webContext"""
         val safeTurns = turns.filter { it.second.isNotBlank() }.ifEmpty { listOf(assistant to reply.trim()) }
         speechGeneration++
         val generation = speechGeneration
-        currentlySpeaking = false
         stopSpeaking()
-        bargeInRecognizer?.destroy()
-        bargeInRecognizer = null
         selectAssistant(assistant)
         transcript.text = "YOU\\n$message\\n\\n" + safeTurns.joinToString("\\n\\n") { (who, words) -> "$who\\n$words" }
         status.text = "Preparing voices..."
@@ -628,73 +637,15 @@ $webContext"""
     private fun speakSequence(turns: List<Pair<String, String>>, index: Int, generation: Int) {
         if (generation != speechGeneration) return
         if (index >= turns.size) {
-            currentlySpeaking = false
-            bargeInRecognizer?.destroy()
-            bargeInRecognizer = null
             status.text = if (handsFreeEnabled) "${activeAssistant.uppercase(Locale.ROOT)} • HANDS-FREE ON — LISTENING NEXT" else "${activeAssistant.uppercase(Locale.ROOT)} • READY — TAP CORE TO SPEAK"
             if (handsFreeEnabled) scheduleNextListen(500)
             return
         }
         val (who, words) = turns[index]
         selectAssistant(who)
-        currentlySpeaking = true
-        status.text = "$who is speaking... (talk any time to interrupt)"
-        armBargeInListener()
+        status.text = "$who is speaking..."
         speak(words, who) {
             if (generation == speechGeneration) speakSequence(turns, index + 1, generation)
-        }
-    }
-
-    private fun armBargeInListener() {
-        if (!currentlySpeaking || isFinishing || isDestroyed) return
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
-            !SpeechRecognizer.isRecognitionAvailable(this)) return
-        bargeInRecognizer?.destroy()
-        val listener = SpeechRecognizer.createSpeechRecognizer(this)
-        bargeInRecognizer = listener
-        var userStartedTalking = false
-        listener.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {
-                if (!currentlySpeaking || userStartedTalking) return
-                userStartedTalking = true
-                speechGeneration++
-                currentlySpeaking = false
-                stopSpeaking()
-                status.text = "Interrupted. Listening to you, Fynn..."
-            }
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onError(error: Int) {
-                if (!userStartedTalking && currentlySpeaking) {
-                    mainHandler.postDelayed({ if (currentlySpeaking) armBargeInListener() }, 350)
-                }
-            }
-            override fun onResults(results: Bundle?) {
-                val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (!words.isNullOrBlank() && userStartedTalking) {
-                    bargeInRecognizer?.destroy()
-                    bargeInRecognizer = null
-                    handleMessage(words)
-                } else if (currentlySpeaking) {
-                    mainHandler.postDelayed({ if (currentlySpeaking) armBargeInListener() }, 250)
-                }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak any time to interrupt")
-        }
-        try {
-            listener.startListening(intent)
-        } catch (_: Exception) {
-            listener.destroy()
-            if (bargeInRecognizer === listener) bargeInRecognizer = null
         }
     }
 
@@ -850,9 +801,6 @@ $webContext"""
 
     override fun onDestroy() {
         recognizer?.destroy()
-        bargeInRecognizer?.destroy()
-        bargeInRecognizer = null
-        currentlySpeaking = false
         speechGeneration++
         fishPlayer?.release()
         fishPlayer = null
