@@ -51,6 +51,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var handsFreeButton: Button
     private lateinit var input: EditText
     private var fishPlayer: MediaPlayer? = null
+    private var bargeInRecognizer: SpeechRecognizer? = null
+    private var currentlySpeaking = false
+    private var speechGeneration = 0
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var memoryView: TextView
     private val prefs by lazy { getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE) }
@@ -115,7 +118,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER
             background = makeOrbDrawable(false)
             elevation = 10f
-            setOnClickListener { stopSpeaking(); listen() }
+            setOnClickListener {
+                speechGeneration++
+                currentlySpeaking = false
+                stopSpeaking()
+                listen()
+            }
         }
         val orbParams = LinearLayout.LayoutParams(dp(224), dp(224)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
@@ -440,9 +448,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun handleMessage(message: String, assistant: String = activeAssistant) {
+        val mentionsUltron = Regex("(?i)\\b(?:hey\\s+)?ultron\\b").containsMatchIn(message)
+        val mentionsJarvis = Regex("(?i)\\b(?:hey\\s+)?jarvis\\b").containsMatchIn(message)
+        val bothRequested = mentionsUltron && mentionsJarvis
         val speaker = when {
-            Regex("(?i)\\b(?:hey\\s+)?ultron\\b").containsMatchIn(message) -> "Ultron"
-            Regex("(?i)\\b(?:hey\\s+)?jarvis\\b").containsMatchIn(message) -> "Jarvis"
+            mentionsUltron -> "Ultron"
+            mentionsJarvis -> "Jarvis"
             else -> assistant
         }
         activeAssistant = speaker
@@ -518,12 +529,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 } else {
                     "You are J.A.R.V.I.S., Fynn's sharp, observant, composed, responsible AI companion. Be practical, direct, warmly protective, and willing to push back on foolish ideas. You notice details and gently challenge Ultron when he encourages bad decisions."
                 }
+                val speakingMode = if (bothRequested) {
+                    "Fynn explicitly addressed BOTH Jarvis and Ultron. Answer as both assistants in one response, using short separate lines beginning exactly with ULTRON: and JARVIS:. Ultron contributes first because he was addressed first, then Jarvis adds a useful second perspective. Both must help with the actual request."
+                } else {
+                    "You are currently speaking as $speaker. Respond as $speaker. Do not refuse ordinary learning, homework, math, writing, planning, or everyday help. If Fynn asks for help with a subject, help directly and explain the steps clearly."
+                }
                 val systemPrompt = """$persona
 ${dateAwarenessContext()}
-You are currently speaking as $speaker. Respond only as $speaker in one normal reply.
+$speakingMode
 You are directly chatting with Fynn inside this app. You absolutely can communicate with him here. Never say you cannot communicate with Fynn, never refer him to official channels, and never treat him as a third party who is not present.
 When Fynn asks for your opinion or asks what he should do, give a clear, friendly opinion first, then briefly explain why. Do not respond with a generic question that ignores what he asked. For school attendance, generally encourage going unless illness, safety, or a serious personal circumstance is involved; ask about the circumstance only if needed.
-Treat Fynn as a friend having a real conversation, not as a formal support ticket. Understand the meaning of the latest message and respond to it directly.
+Treat Fynn as a friend having a real conversation, not as a formal support ticket. Understand the meaning of the latest message and respond to it directly. You are his helpers: actively solve math problems, explain homework step by step, brainstorm, teach, and work alongside him. Never refuse a harmless request for help just because it is schoolwork; do not tell him to ask a teacher instead of helping him.
 If Fynn makes a casual statement, joke, greeting, or says what he is doing, reply naturally to that statement and keep the conversation going. Do not demand context or say that information was not provided unless a specific essential fact is genuinely missing.
 For example, if Fynn says he is hanging out with Ultron, respond conversationally about hanging out with Ultron; do not say you are hanging out with Fynn, invent a quote from Fynn, or switch into a made-up dialogue.
 Do not write both assistants unless Fynn asks for both, says "you guys", or the conversation clearly invites a Jarvis-and-Ultron exchange. When both participate, write short labeled turns like "ULTRON: ..." and "JARVIS: ..." so each line is spoken in the correct voice. Ultron should be mischievous and cheekily support harmless bad ideas; Jarvis should be responsible and may jump in with "Not a chance" and a witty rebuttal. Keep their banter playful and fictional.
@@ -570,8 +586,6 @@ $webContext"""
     }
 
     private fun showReply(message: String, reply: String, assistant: String = activeAssistant) {
-        // Accept both [JARVIS]: and JARVIS: labels, even when the model puts
-        // the entire multi-speaker conversation on one physical line.
         val marker = Regex("(?i)(?:\\[\\s*)?(JARVIS|ULTRON)(?:\\s*\\])?\\s*:")
         val matches = marker.findAll(reply).toList()
         val turns = mutableListOf<Pair<String, String>>()
@@ -582,9 +596,7 @@ $webContext"""
             val last = turns.lastOrNull()
             if (last != null && last.first.equals(who, ignoreCase = true)) {
                 turns[turns.lastIndex] = last.first to (last.second + " " + cleaned)
-            } else {
-                turns.add(who to cleaned)
-            }
+            } else turns.add(who to cleaned)
         }
 
         if (matches.isEmpty()) {
@@ -601,22 +613,89 @@ $webContext"""
         }
 
         val safeTurns = turns.filter { it.second.isNotBlank() }.ifEmpty { listOf(assistant to reply.trim()) }
+        speechGeneration++
+        val generation = speechGeneration
+        currentlySpeaking = false
+        stopSpeaking()
+        bargeInRecognizer?.destroy()
+        bargeInRecognizer = null
         selectAssistant(assistant)
-        transcript.text = "YOU\n$message\n\n" + safeTurns.joinToString("\n\n") { (who, words) -> "$who\n$words" }
+        transcript.text = "YOU\\n$message\\n\\n" + safeTurns.joinToString("\\n\\n") { (who, words) -> "$who\\n$words" }
         status.text = "Preparing voices..."
-        speakSequence(safeTurns, 0)
+        speakSequence(safeTurns, 0, generation)
     }
 
-    private fun speakSequence(turns: List<Pair<String, String>>, index: Int) {
+    private fun speakSequence(turns: List<Pair<String, String>>, index: Int, generation: Int) {
+        if (generation != speechGeneration) return
         if (index >= turns.size) {
+            currentlySpeaking = false
+            bargeInRecognizer?.destroy()
+            bargeInRecognizer = null
             status.text = if (handsFreeEnabled) "${activeAssistant.uppercase(Locale.ROOT)} • HANDS-FREE ON — LISTENING NEXT" else "${activeAssistant.uppercase(Locale.ROOT)} • READY — TAP CORE TO SPEAK"
             if (handsFreeEnabled) scheduleNextListen(500)
             return
         }
         val (who, words) = turns[index]
         selectAssistant(who)
-        status.text = "$who is speaking..."
-        speak(words, who) { speakSequence(turns, index + 1) }
+        currentlySpeaking = true
+        status.text = "$who is speaking... (talk any time to interrupt)"
+        armBargeInListener()
+        speak(words, who) {
+            if (generation == speechGeneration) speakSequence(turns, index + 1, generation)
+        }
+    }
+
+    private fun armBargeInListener() {
+        if (!currentlySpeaking || isFinishing || isDestroyed) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
+            !SpeechRecognizer.isRecognitionAvailable(this)) return
+        bargeInRecognizer?.destroy()
+        val listener = SpeechRecognizer.createSpeechRecognizer(this)
+        bargeInRecognizer = listener
+        var userStartedTalking = false
+        listener.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {
+                if (!currentlySpeaking || userStartedTalking) return
+                userStartedTalking = true
+                speechGeneration++
+                currentlySpeaking = false
+                stopSpeaking()
+                status.text = "Interrupted. Listening to you, Fynn..."
+            }
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(error: Int) {
+                if (!userStartedTalking && currentlySpeaking) {
+                    mainHandler.postDelayed({ if (currentlySpeaking) armBargeInListener() }, 350)
+                }
+            }
+            override fun onResults(results: Bundle?) {
+                val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (!words.isNullOrBlank() && userStartedTalking) {
+                    bargeInRecognizer?.destroy()
+                    bargeInRecognizer = null
+                    handleMessage(words)
+                } else if (currentlySpeaking) {
+                    mainHandler.postDelayed({ if (currentlySpeaking) armBargeInListener() }, 250)
+                }
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak any time to interrupt")
+        }
+        try {
+            listener.startListening(intent)
+        } catch (_: Exception) {
+            listener.destroy()
+            if (bargeInRecognizer === listener) bargeInRecognizer = null
+        }
     }
 
     private fun stopSpeaking() {
@@ -771,6 +850,10 @@ $webContext"""
 
     override fun onDestroy() {
         recognizer?.destroy()
+        bargeInRecognizer?.destroy()
+        bargeInRecognizer = null
+        currentlySpeaking = false
+        speechGeneration++
         fishPlayer?.release()
         fishPlayer = null
         tts?.stop()
