@@ -643,18 +643,26 @@ $webContext"""
                     .put("model", model)
                     .put("messages", chatMessages)
                     .put("stream", false)
-                    .put("keep_alive", "10m")
-                    .put("options", JSONObject().put("temperature", 0.55).put("num_predict", 120).put("num_ctx", 2048))
+                if (useOpenAi) {
+                    body.put("temperature", 0.7).put("max_tokens", 180)
+                } else {
+                    body.put("keep_alive", "10m")
+                        .put("options", JSONObject().put("temperature", 0.55).put("num_predict", 120).put("num_ctx", 2048))
+                }
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 connection.disconnect()
                 if (code !in 200..299) {
-                    throw IllegalStateException("Local Ollama returned HTTP $code. Start Ollama in Termux and check that the configured model is installed.")
+                    val details = try { JSONObject(responseText).optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
+                    val source = if (useOpenAi) "OpenAI GPT" else "local Ollama"
+                    val fallback = if (useOpenAi) "Check your API key, API billing, and model name in Assistant Settings." else "Start Ollama in Termux and check that the configured model is installed."
+                    throw IllegalStateException("$source returned HTTP $code. " + details.ifBlank { fallback })
                 }
                 val json = JSONObject(responseText)
-                val reply = json.getJSONObject("message").getString("content").trim()
+                val rawReply = if (useOpenAi) json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content") else json.getJSONObject("message").getString("content")
+                val reply = removeImpersonatedUserLines(rawReply)
                 runOnUiThread {
                     val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
                     val peerKey = if (speaker.equals("Ultron", ignoreCase = true)) "chat_history" else "ultron_chat_history"
