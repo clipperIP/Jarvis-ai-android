@@ -297,11 +297,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         prefs.edit().putBoolean("hands_free_enabled", enabled).apply()
         if (::handsFreeButton.isInitialized) handsFreeButton.text = if (enabled) "HANDS-FREE MODE: ON - TAP TO STOP" else "ENABLE HANDS-FREE MODE"
         if (enabled) {
-            status.text = "Hands-free on. I will listen again after each reply while Jarvis is open."
-            listen()
+            status.text = "Hands-free on. I'll keep listening between replies while the app is open."
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), requestAudio)
+            } else {
+                scheduleNextListen(250)
+            }
         } else {
             mainHandler.removeCallbacksAndMessages(null)
             recognizer?.cancel()
+            recognizer?.destroy()
+            recognizer = null
             status.text = "Hands-free mode off."
         }
     }
@@ -332,7 +338,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() { status.text = "Thinking..." }
             override fun onError(error: Int) {
-                status.text = "Didn't catch that. Tap the blue core and try again."
+                // Android speech recognition often times out or returns NO_MATCH during hands-free silence.
+                // Recover automatically instead of leaving hands-free mode stuck.
+                val message = when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Still here, Fynn. Listening again..."
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Restarting the microphone..."
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is needed for hands-free mode."
+                    else -> "Listening stopped. Trying again..."
+                }
+                status.text = message
+                if (handsFreeEnabled && !isFinishing && !isDestroyed) {
+                    scheduleNextListen(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1400 else 800)
+                } else if (!handsFreeEnabled) {
+                    status.text = "Didn't catch that. Tap the blue core and try again."
+                }
             }
             override fun onResults(results: Bundle?) {
                 val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
@@ -346,9 +365,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Jarvis")
         }
-        recognizer?.startListening(intent)
+        try {
+            recognizer?.startListening(intent)
+        } catch (_: Exception) {
+            status.text = if (handsFreeEnabled) "Restarting listening..." else "Couldn't start listening. Tap the core to try again."
+            if (handsFreeEnabled) scheduleNextListen(1200)
+        }
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == requestAudio) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                status.text = "Microphone ready."
+                if (handsFreeEnabled) scheduleNextListen(700)
+            } else {
+                status.text = "Microphone permission denied. Enable it in Android app settings to use hands-free."
+            }
+        }
+    }
 
     private fun dateAwarenessContext(): String {
         val today = Calendar.getInstance()
