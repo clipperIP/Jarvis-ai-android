@@ -2,6 +2,7 @@ package com.fynn.jarvis
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -43,9 +44,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var orb: TextView
     private var activeAssistant = "Jarvis"
     private lateinit var input: EditText
-    private lateinit var apiKeyInput: EditText
-    private lateinit var fishApiKeyInput: EditText
-    private lateinit var fishVoiceInput: EditText
     private var fishPlayer: MediaPlayer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var memoryView: TextView
@@ -79,9 +77,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textSize = 13f
             letterSpacing = 0.22f
             setTextColor(Color.rgb(100, 205, 255))
-            gravity = Gravity.CENTER
-            setPadding(0, 10, 0, 4)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 10, 0, 10)
         }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val settingsButton = Button(this).apply {
+            text = "⚙"
+            contentDescription = "Settings"
+            textSize = 22f
+            setOnClickListener { openSettings() }
+        }
+        header.addView(title, LinearLayout.LayoutParams(0, dp(52), 1f))
+        header.addView(settingsButton, LinearLayout.LayoutParams(dp(64), dp(48)))
         status = TextView(this).apply {
             text = "Systems starting..."
             textSize = 16f
@@ -140,73 +150,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
         }
-        val aiTitle = TextView(this).apply {
-            text = "AI BRAIN SETUP"
-            textSize = 14f
-            setTextColor(Color.rgb(95, 210, 255))
-            setPadding(0, 20, 0, 6)
-        }
-        apiKeyInput = EditText(this).apply {
-            hint = "Paste your Google AI Studio API key"
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.GRAY)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setText(prefs.getString("gemini_api_key", "") ?: "")
-        }
-        val saveKey = Button(this).apply {
-            text = "Save AI key on this device"
-            setOnClickListener {
-                val key = apiKeyInput.text.toString().trim()
-                if (key.isBlank()) {
-                    status.text = "Paste your Google AI Studio API key first."
-                } else {
-                    prefs.edit().putString("gemini_api_key", key).apply()
-                    status.text = "AI key saved on this device."
-                    speak("AI key saved. I am ready to think.")
-                }
-            }
-        }
-        val fishTitle = TextView(this).apply {
-            text = "FISH AUDIO VOICE SETUP"
-            textSize = 14f
-            setTextColor(Color.rgb(95, 210, 255))
-            setPadding(0, 20, 0, 6)
-        }
-        val fishInfo = TextView(this).apply {
-            text = "Jarvis uses Fish Audio for spoken replies. Your selected voice is prefilled below."
-            textSize = 13f
-            setTextColor(Color.LTGRAY)
-        }
-        fishApiKeyInput = EditText(this).apply {
-            hint = "Paste your Fish Audio API key"
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.GRAY)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setText(prefs.getString("fish_api_key", "") ?: "")
-        }
-        fishVoiceInput = EditText(this).apply {
-            hint = "Fish Audio voice/model ID"
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.GRAY)
-            inputType = InputType.TYPE_CLASS_TEXT
-            setText(prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
-        }
-        val saveFish = Button(this).apply {
-            text = "Save Fish Audio voice"
-            setOnClickListener {
-                val key = fishApiKeyInput.text.toString().trim()
-                val voiceId = fishVoiceInput.text.toString().trim()
-                if (key.isBlank()) {
-                    status.text = "Paste your Fish Audio API key first."
-                } else if (voiceId.isBlank()) {
-                    status.text = "Enter your Fish Audio voice/model ID."
-                } else {
-                    prefs.edit().putString("fish_api_key", key).putString("fish_voice_id", voiceId).apply()
-                    status.text = "Fish Audio voice saved on this device."
-                    speak("Fish Audio voice saved. I am ready, Fynn.")
-                }
-            }
-        }
         val memoryTitle = TextView(this).apply {
             text = "LOCAL MEMORY"
             textSize = 14f
@@ -222,21 +165,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             text = "Remember typed fact"
             setOnClickListener { rememberFromInput() }
         }
-        content.addView(title, matchWrap())
+        content.addView(header, matchWrap())
         content.addView(status, matchWrap())
         content.addView(orb, orbParams)
         content.addView(assistantPicker, matchWrap())
         content.addView(transcript, matchWrap())
         content.addView(input, matchWrap())
         content.addView(send, matchWrap())
-        content.addView(aiTitle, matchWrap())
-        content.addView(apiKeyInput, matchWrap())
-        content.addView(saveKey, matchWrap())
-        content.addView(fishTitle, matchWrap())
-        content.addView(fishInfo, matchWrap())
-        content.addView(fishApiKeyInput, matchWrap())
-        content.addView(fishVoiceInput, matchWrap())
-        content.addView(saveFish, matchWrap())
         content.addView(memoryTitle, matchWrap())
         content.addView(memoryView, matchWrap())
         content.addView(saveMemory, matchWrap())
@@ -244,6 +179,57 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         refreshMemory()
+    }
+
+    private fun openSettings() {
+        fun field(hintText: String, value: String, secret: Boolean = false): EditText =
+            EditText(this).apply {
+                hint = hintText
+                setText(value)
+                setTextColor(Color.WHITE)
+                setHintTextColor(Color.GRAY)
+                inputType = if (secret) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val geminiKey = field("Google AI Studio API key", prefs.getString("gemini_api_key", "") ?: "", true)
+        val fishKey = field("Fish Audio API key", prefs.getString("fish_api_key", "") ?: "", true)
+        val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
+        val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
+        val help = TextView(this).apply {
+            text = "API keys and voice IDs are saved on this device."
+            textSize = 13f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, 0, 0, dp(8))
+        }
+        panel.addView(help, matchWrap())
+        panel.addView(geminiKey, matchWrap())
+        panel.addView(fishKey, matchWrap())
+        panel.addView(jarvisVoice, matchWrap())
+        panel.addView(ultronVoice, matchWrap())
+        val scroll = ScrollView(this).apply { addView(panel) }
+        AlertDialog.Builder(this)
+            .setTitle("Assistant Settings")
+            .setView(scroll)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save settings") { _, _ ->
+                val gKey = geminiKey.text.toString().trim()
+                val fKey = fishKey.text.toString().trim()
+                val jVoice = jarvisVoice.text.toString().trim()
+                val uVoice = ultronVoice.text.toString().trim()
+                if (gKey.isBlank() || fKey.isBlank() || jVoice.isBlank() || uVoice.isBlank()) {
+                    status.text = "Settings not saved. Fill in all four fields first."
+                    return@setPositiveButton
+                }
+                prefs.edit().putString("gemini_api_key", gKey).putString("fish_api_key", fKey)
+                    .putString("fish_voice_id", jVoice).putString("ultron_voice_id", uVoice).apply()
+                status.text = "Settings saved on this device."
+            }
+            .show()
     }
 
     private fun matchWrap() = LinearLayout.LayoutParams(
@@ -472,7 +458,8 @@ User: $message"""
     private fun selectAssistant(name: String) {
         activeAssistant = name
         val isUltron = name.equals("Ultron", ignoreCase = true)
-        orb.text = if (isUltron) "U" else "J"
+        orb.text = if (isUltron) "Ultron" else "J.A.R.V.I.S"
+        orb.textSize = if (isUltron) 28f else 24f
         orb.background = makeOrbDrawable(isUltron)
         status.text = if (isUltron) "ULTRON • READY" else "JARVIS • READY"
     }
