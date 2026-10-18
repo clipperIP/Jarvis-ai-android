@@ -19,9 +19,14 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.concurrent.thread
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
@@ -29,6 +34,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var transcript: TextView
     private lateinit var input: EditText
+    private lateinit var apiKeyInput: EditText
     private lateinit var memoryView: TextView
     private val prefs by lazy { getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE) }
     private val requestAudio = 42
@@ -94,6 +100,32 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
         }
+        val aiTitle = TextView(this).apply {
+            text = "AI BRAIN SETUP"
+            textSize = 14f
+            setTextColor(Color.rgb(95, 210, 255))
+            setPadding(0, 20, 0, 6)
+        }
+        apiKeyInput = EditText(this).apply {
+            hint = "Paste your Google AI Studio API key"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(prefs.getString("gemini_api_key", "") ?: "")
+        }
+        val saveKey = Button(this).apply {
+            text = "Save AI key on this device"
+            setOnClickListener {
+                val key = apiKeyInput.text.toString().trim()
+                if (key.isBlank()) {
+                    status.text = "Paste your Google AI Studio API key first."
+                } else {
+                    prefs.edit().putString("gemini_api_key", key).apply()
+                    status.text = "AI key saved on this device."
+                    speak("AI key saved. I am ready to think.")
+                }
+            }
+        }
         val memoryTitle = TextView(this).apply {
             text = "LOCAL MEMORY"
             textSize = 14f
@@ -115,6 +147,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         content.addView(mic, matchWrap())
         content.addView(input, matchWrap())
         content.addView(send, matchWrap())
+        content.addView(aiTitle, matchWrap())
+        content.addView(apiKeyInput, matchWrap())
+        content.addView(saveKey, matchWrap())
         content.addView(memoryTitle, matchWrap())
         content.addView(memoryView, matchWrap())
         content.addView(saveMemory, matchWrap())
@@ -161,7 +196,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onBeginningOfSpeech() { status.text = "I'm listening, Fynn." }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { status.text = "Processing..." }
+            override fun onEndOfSpeech() { status.text = "Thinking..." }
             override fun onError(error: Int) { status.text = "Didn't catch that. Tap the microphone to try again." }
             override fun onResults(results: Bundle?) {
                 val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
@@ -180,7 +215,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun handleMessage(message: String) {
         val lower = message.lowercase(Locale.ROOT)
-        val reply = when {
+        val localReply: String? = when {
             lower.contains("what do you remember") || lower.contains("show memory") ->
                 "Here's what I remember: ${prefs.getString("facts", "No saved facts yet.")}"
             lower.startsWith("remember that ") -> {
@@ -195,11 +230,73 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 "I am Jarvis, your personal voice assistant."
             lower.contains("hello") || lower.contains("hi jarvis") || lower == "hi" ->
                 "Hello, Fynn. How can I help?"
-            lower.contains("time") ->
+            lower.contains("what time") || lower == "time" ->
                 "The current device time is ${SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())}."
-            else ->
-                "I heard you say: $message. I can take voice input, speak replies, and remember facts locally. A connected AI brain and hands-free wake phrase still need to be added."
+            else -> null
         }
+        if (localReply != null) {
+            showReply(message, localReply)
+            return
+        }
+        val key = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
+        if (key.isBlank()) {
+            val reply = "My AI brain isn't connected yet. Add a Google AI Studio API key in the AI Brain Setup section, then tap Save."
+            showReply(message, reply)
+            return
+        }
+        status.text = "Jarvis is thinking..."
+        thread {
+            try {
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 30000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("x-goog-api-key", key)
+                }
+                val facts = prefs.getString("facts", "") ?: ""
+                val history = prefs.getString("chat_history", "") ?: ""
+                val prompt = """You are J.A.R.V.I.S., Fynn's personal voice assistant. Be natural, friendly, direct, useful, and conversational. Answer the user's actual question; never repeat setup/status text unless asked. The user's saved local facts are:
+$facts
+
+Recent conversation:
+$history
+
+User: $message"""
+                val body = JSONObject()
+                    .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
+                    .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 500))
+                connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                connection.disconnect()
+                if (code !in 200..299) {
+                    throw IllegalStateException("Google AI returned HTTP $code. Check the API key and API access.")
+                }
+                val json = JSONObject(responseText)
+                val reply = json.getJSONArray("candidates").getJSONObject(0)
+                    .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
+                runOnUiThread {
+                    val updatedHistory = (history + "
+User: " + message + "
+Jarvis: " + reply).takeLast(6000)
+                    prefs.edit().putString("chat_history", updatedHistory).apply()
+                    showReply(message, reply)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    val reason = e.message ?: "Network or API error."
+                    val reply = "I couldn't reach my AI brain. $reason"
+                    showReply(message, reply)
+                }
+            }
+        }
+    }
+
+    private fun showReply(message: String, reply: String) {
         transcript.text = "You: $message\n\nJarvis: $reply"
         status.text = "Ready, Fynn."
         speak(reply)
