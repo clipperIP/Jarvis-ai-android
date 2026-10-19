@@ -26,6 +26,7 @@ import java.util.Locale
 
 class WakeWordService : Service() {
     private val handler = Handler(Looper.getMainLooper())
+    private val popupHandler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var overlay: TextView? = null
     private var listening = false
@@ -115,7 +116,6 @@ class WakeWordService : Service() {
     }
 
     private fun restartSoon(delay: Long) {
-        handler.removeCallbacksAndMessages(null)
         handler.postDelayed({ if (getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE).getBoolean("background_wake_enabled", false)) startListening() else stopSelf() }, delay)
     }
 
@@ -178,13 +178,13 @@ class WakeWordService : Service() {
             try {
                 getSystemService(WindowManager::class.java).addView(bubble, params)
                 overlay = bubble
-                handler.postDelayed({ removePopup() }, 12000)
+                popupHandler.postDelayed({ removePopup() }, 12000)
             } catch (_: Exception) { overlay = null }
         }
     }
 
     private fun removePopup() {
-        handler.removeCallbacksAndMessages(null)
+        popupHandler.removeCallbacksAndMessages(null)
         val current = overlay ?: return
         try { getSystemService(WindowManager::class.java).removeView(current) } catch (_: Exception) {}
         overlay = null
