@@ -132,14 +132,12 @@ class WakeWordService : Service() {
         val cleaned = phrase
             .replace(Regex("\\bhey\\s+jarvis\\b|\\bjarvis\\b|\\bhey\\s+ultron\\b|\\bultron\\b", RegexOption.IGNORE_CASE), "")
             .trim(' ', ',', '.', '?', '!', ':', ';')
-        showPopup(assistant)
         val open = Intent(this, MainActivity::class.java).apply {
             putExtra(EXTRA_ASSISTANT, assistant)
             putExtra(EXTRA_WAKE_TEXT, cleaned)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
-        // Keep the popup visible; tapping it opens the assistant with any words spoken after the wake name.
-        overlay?.setOnClickListener { startActivity(open); removePopup() }
+        showPopup(assistant, open)
         val nm = getSystemService(NotificationManager::class.java)
         val openIntent = PendingIntent.getActivity(this, 2, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, channelId) else @Suppress("DEPRECATION") Notification.Builder(this)
@@ -149,7 +147,7 @@ class WakeWordService : Service() {
             .setContentIntent(openIntent).setOngoing(true).build())
     }
 
-    private fun showPopup(assistant: String) {
+    private fun showPopup(assistant: String, openIntent: Intent) {
         if (!Settings.canDrawOverlays(this)) {
             handler.post { Toast.makeText(this, "Wake word detected: $assistant. Allow “Display over other apps” for the popup.", Toast.LENGTH_LONG).show() }
             return
@@ -167,6 +165,7 @@ class WakeWordService : Service() {
                     setStroke(2, if (assistant == "Jarvis") Color.rgb(75, 190, 255) else Color.rgb(190, 80, 255))
                 }
                 elevation = 12f
+                setOnClickListener { startActivity(openIntent); removePopup() }
             }
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
