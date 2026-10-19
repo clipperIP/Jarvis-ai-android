@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
+import android.provider.Settings
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
@@ -49,6 +50,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var activeAssistant = "Jarvis"
     private var handsFreeEnabled = false
     private lateinit var handsFreeButton: Button
+    private lateinit var backgroundWakeButton: Button
     private lateinit var interruptButton: Button
     private lateinit var input: EditText
     private var fishPlayer: MediaPlayer? = null
@@ -65,6 +67,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         handsFreeEnabled = prefs.getBoolean("hands_free_enabled", false)
         buildUi()
+        backgroundWakeButton.text = if (prefs.getBoolean("background_wake_enabled", false)) "BACKGROUND WAKE WORDS: ON" else "ENABLE BACKGROUND WAKE WORDS"
+        if (intent?.getStringExtra(WakeWordService.EXTRA_ASSISTANT) != null) applyWakeIntent(intent)
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), requestAudio)
         } else if (handsFreeEnabled) {
@@ -195,6 +199,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { setHandsFree(!handsFreeEnabled) }
         }
         content.addView(handsFreeButton, matchWrap())
+        backgroundWakeButton = Button(this).apply {
+            text = "ENABLE BACKGROUND WAKE WORDS"
+            setOnClickListener { toggleBackgroundWake() }
+        }
+        content.addView(backgroundWakeButton, matchWrap())
         interruptButton = Button(this).apply {
             text = "INTERRUPT & SPEAK"
             contentDescription = "Stop the assistant's current speech and listen for a new message"
@@ -219,6 +228,56 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         refreshMemory()
+    }
+
+    private fun toggleBackgroundWake() {
+        val enabled = prefs.getBoolean("background_wake_enabled", false)
+        if (enabled) {
+            prefs.edit().putBoolean("background_wake_enabled", false).apply()
+            stopService(Intent(this, WakeWordService::class.java))
+            backgroundWakeButton.text = "ENABLE BACKGROUND WAKE WORDS"
+            status.text = "Background wake words off."
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), requestAudio)
+            status.text = "Allow microphone access, then enable background wake words again."
+            return
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            val overlayIntent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            startActivity(overlayIntent)
+            status.text = "Allow Display over other apps, then tap Enable Background Wake Words again."
+            return
+        }
+        prefs.edit().putBoolean("background_wake_enabled", true).apply()
+        val serviceIntent = Intent(this, WakeWordService::class.java)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(serviceIntent) else startService(serviceIntent)
+            backgroundWakeButton.text = "BACKGROUND WAKE WORDS: ON - TAP TO STOP"
+            status.text = "Background wake words enabled. Say Hey Jarvis or Hey Ultron."
+        } catch (_: Exception) {
+            prefs.edit().putBoolean("background_wake_enabled", false).apply()
+            status.text = "Could not start background listening. Open the app and try again."
+        }
+    }
+
+    private fun applyWakeIntent(intent: Intent) {
+        val assistant = intent.getStringExtra(WakeWordService.EXTRA_ASSISTANT) ?: return
+        activeAssistant = assistant
+        selectAssistant(assistant)
+        val spoken = intent.getStringExtra(WakeWordService.EXTRA_WAKE_TEXT).orEmpty()
+        intent.removeExtra(WakeWordService.EXTRA_ASSISTANT)
+        intent.removeExtra(WakeWordService.EXTRA_WAKE_TEXT)
+        if (spoken.isNotBlank()) handleMessage(spoken)
+        else if (handsFreeEnabled) scheduleNextListen(300)
+        else status.text = "$assistant is ready. Tap the core or speak to continue."
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyWakeIntent(intent)
     }
 
     private fun openSettings() {
