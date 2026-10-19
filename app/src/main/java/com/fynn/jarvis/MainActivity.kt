@@ -236,13 +236,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val localModel = field("Groq model (recommended: llama-3.3-70b-versatile)", prefs.getString("local_model", "llama-3.3-70b-versatile") ?: "llama-3.3-70b-versatile")
+        val localModel = field("Groq model (recommended: openai/gpt-oss-120b)", prefs.getString("local_model", "openai/gpt-oss-120b") ?: "openai/gpt-oss-120b")
         val groqKey = field("Groq API key (required)", prefs.getString("groq_api_key", "") ?: "", true)
         val fishKey = field("Fish Audio API key (optional)", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "Jarvis now uses Groq. Recommended model: llama-3.3-70b-versatile. Enter your Groq API key below. Free usage has rate limits; it is not unlimited. Fish Audio is optional for voice output."
+            text = "Jarvis now uses Groq. Recommended model: openai/gpt-oss-120b. Enter your Groq API key below. Free usage has rate limits; it is not unlimited. Fish Audio is optional for voice output."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
@@ -568,12 +568,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "$speaker is thinking..."
         thread {
             try {
-                val model = prefs.getString("local_model", "llama-3.3-70b-versatile")?.trim().orEmpty().ifBlank { "llama-3.3-70b-versatile" }
+                val model = prefs.getString("local_model", "openai/gpt-oss-120b")?.trim().orEmpty().ifBlank { "openai/gpt-oss-120b" }
                 val groqKey = prefs.getString("groq_api_key", "")?.trim().orEmpty()
                 if (groqKey.isBlank()) {
                     throw IllegalStateException("To use Groq, open Assistant Settings, enter your Groq API key, and save settings.")
                 }
-                val safeModel = model.ifBlank { "llama-3.3-70b-versatile" }
+                val safeModel = model.ifBlank { "openai/gpt-oss-120b" }
                 val url = URL("https://api.groq.com/openai/v1/chat/completions")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
