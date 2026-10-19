@@ -302,19 +302,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val localModel = field("Groq model (recommended: openai/gpt-oss-120b)", prefs.getString("local_model", "openai/gpt-oss-120b") ?: "openai/gpt-oss-120b")
-        val groqKey = field("Groq API key (required)", prefs.getString("groq_api_key", "") ?: "", true)
+        val provider = field("AI provider: ollama or groq (recommended: ollama)", prefs.getString("ai_provider", "ollama") ?: "ollama")
+        val localModel = field("Model name (Ollama example: llama3.2:3b)", prefs.getString("local_model", "llama3.2:3b") ?: "llama3.2:3b")
+        val ollamaUrl = field("Ollama server URL (default: http://127.0.0.1:11434)", prefs.getString("ollama_url", "http://127.0.0.1:11434") ?: "http://127.0.0.1:11434")
+        val groqKey = field("Groq API key (only needed if provider is groq)", prefs.getString("groq_api_key", "") ?: "", true)
         val fishKey = field("Fish Audio API key (optional)", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "Jarvis now uses Groq. Recommended model: openai/gpt-oss-120b. Enter your Groq API key below. Free usage has rate limits; it is not unlimited. Fish Audio is optional for voice output."
+            text = "Choose ollama or groq. Ollama must already be running at the server URL and have the selected model downloaded. Default is this phone (127.0.0.1); a server on another device needs its LAN IP. Groq requires a key and has usage limits. Fish Audio is optional for voice output."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
         }
         panel.addView(help, matchWrap())
+        panel.addView(provider, matchWrap())
         panel.addView(localModel, matchWrap())
+        panel.addView(ollamaUrl, matchWrap())
         panel.addView(groqKey, matchWrap())
         panel.addView(fishKey, matchWrap())
         panel.addView(jarvisVoice, matchWrap())
@@ -325,18 +329,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .setView(scroll)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save settings") { _, _ ->
+                val selectedProvider = provider.text.toString().trim().lowercase(Locale.ROOT)
                 val model = localModel.text.toString().trim()
+                val serverUrl = ollamaUrl.text.toString().trim().trimEnd('/')
                 val fKey = fishKey.text.toString().trim()
                 val jVoice = jarvisVoice.text.toString().trim()
                 val uVoice = ultronVoice.text.toString().trim()
-                if (model.isBlank() || jVoice.isBlank() || uVoice.isBlank()) {
-                    status.text = "Settings not saved. Enter a model name and both voice IDs."
+                if (selectedProvider !in listOf("ollama", "groq") || model.isBlank() || serverUrl.isBlank() || jVoice.isBlank() || uVoice.isBlank()) {
+                    status.text = "Settings not saved. Provider must be ollama or groq; enter a model, server URL, and both voice IDs."
                     return@setPositiveButton
                 }
-                prefs.edit().putString("local_model", model).putString("groq_api_key", groqKey.text.toString().trim())
+                prefs.edit().putString("ai_provider", selectedProvider).putString("local_model", model).putString("ollama_url", serverUrl).putString("groq_api_key", groqKey.text.toString().trim())
                     .putString("fish_api_key", fKey).putString("fish_voice_id", jVoice)
                     .putString("ultron_voice_id", uVoice).apply()
-                status.text = "Groq settings saved."
+                status.text = "$selectedProvider settings saved."
             }
             .show()
     }
@@ -634,20 +640,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "$speaker is thinking..."
         thread {
             try {
-                val model = prefs.getString("local_model", "openai/gpt-oss-120b")?.trim().orEmpty().ifBlank { "openai/gpt-oss-120b" }
+                val providerName = (prefs.getString("ai_provider", "ollama") ?: "ollama").trim().lowercase(Locale.ROOT)
+                val model = prefs.getString("local_model", if (providerName == "ollama") "llama3.2:3b" else "openai/gpt-oss-120b")?.trim().orEmpty()
+                    .ifBlank { if (providerName == "ollama") "llama3.2:3b" else "openai/gpt-oss-120b" }
                 val groqKey = prefs.getString("groq_api_key", "")?.trim().orEmpty()
-                if (groqKey.isBlank()) {
-                    throw IllegalStateException("To use Groq, open Assistant Settings, enter your Groq API key, and save settings.")
-                }
-                val safeModel = model.ifBlank { "openai/gpt-oss-120b" }
-                val url = URL("https://api.groq.com/openai/v1/chat/completions")
-                val connection = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 5000
-                    readTimeout = 60000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("Authorization", "Bearer $groqKey")
+                if (providerName !in listOf("ollama", "groq")) throw IllegalStateException("Unknown AI provider. In Settings, choose ollama or groq.")
+                val safeModel = model
+                val endpoint: String
+                val connection: HttpURLConnection
+                if (providerName == "ollama") {
+                    val baseUrl = (prefs.getString("ollama_url", "http://127.0.0.1:11434") ?: "http://127.0.0.1:11434").trim().trimEnd('/')
+                    endpoint = baseUrl + "/api/chat"
+                    connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 7000
+                        readTimeout = 120000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json")
+                    }
+                } else {
+                    if (groqKey.isBlank()) throw IllegalStateException("To use Groq, open Assistant Settings and enter your Groq API key.")
+                    endpoint = "https://api.groq.com/openai/v1/chat/completions"
+                    connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 7000
+                        readTimeout = 60000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json")
+                        setRequestProperty("Authorization", "Bearer $groqKey")
+                    }
                 }
                 val facts = (prefs.getString("facts", "") ?: "").takeLast(900)
                 val fullConversationMemory = readRecentConversationLog(6000)
@@ -705,11 +726,13 @@ $webContext"""
                     }
                 }
                 chatMessages.put(JSONObject().put("role", "user").put("content", cleanMessage))
-                val body = JSONObject()
-                    .put("model", safeModel)
-                    .put("messages", chatMessages)
-                    .put("temperature", 0.7)
-                    .put("max_tokens", 512)
+                val body = if (providerName == "ollama") {
+                    JSONObject().put("model", safeModel).put("messages", chatMessages).put("stream", false)
+                        .put("options", JSONObject().put("temperature", 0.7).put("num_predict", 512))
+                } else {
+                    JSONObject().put("model", safeModel).put("messages", chatMessages)
+                        .put("temperature", 0.7).put("max_tokens", 512)
+                }
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
@@ -717,11 +740,14 @@ $webContext"""
                 connection.disconnect()
                 if (code !in 200..299) {
                     val details = try { JSONObject(responseText).optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
-                    throw IllegalStateException("Groq returned HTTP $code. " + details.ifBlank { "Check your Groq API key, model name, and rate limits." })
+                    throw IllegalStateException("$providerName returned HTTP $code. " + details.ifBlank { if (providerName == "ollama") "Check that Ollama is running, the server URL is reachable, and the model is installed." else "Check your Groq API key, model name, and rate limits." })
                 }
                 val json = JSONObject(responseText)
-                val rawReply = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim().orEmpty()
-                    .ifBlank { throw IllegalStateException("Groq returned no text. Try again or check your API rate limits.") }
+                val rawReply = (if (providerName == "ollama") {
+                    json.optJSONObject("message")?.optString("content")?.trim().orEmpty()
+                } else {
+                    json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim().orEmpty()
+                }).ifBlank { throw IllegalStateException("$providerName returned no text. Check the model and server.") }
                 val reply = removeImpersonatedUserLines(rawReply)
                 runOnUiThread {
                     val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
@@ -733,7 +759,9 @@ $webContext"""
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    val reply = "I couldn't reach Groq. Check your internet connection, Groq API key, model name, and rate limits. Details: ${e.message ?: "connection failed"}"
+                    val providerName = (prefs.getString("ai_provider", "ollama") ?: "ollama").trim().lowercase(Locale.ROOT)
+                    val hint = if (providerName == "ollama") "Make sure Ollama is running and the server URL in Settings is reachable. On Android, 127.0.0.1 only works if Ollama is running on this same phone; otherwise use the host device's local network IP." else "Check your internet connection, Groq API key, model name, and rate limits."
+                    val reply = "I couldn't reach $providerName. $hint Details: ${e.message ?: "connection failed"}"
                     showReply(message, reply, speaker)
                 }
             }
