@@ -31,6 +31,7 @@ class WakeWordService : Service() {
     private var overlay: TextView? = null
     private var listening = false
     private var lastWakeAt = 0L
+    private var pendingAssistant: String? = null
     private val channelId = "jarvis_wake_listener"
 
     override fun onCreate() {
@@ -89,9 +90,14 @@ class WakeWordService : Service() {
                     override fun onError(error: Int) { listening = false; restartSoon(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1200 else 500) }
                     override fun onResults(results: android.os.Bundle?) {
                         listening = false
-                        val lines = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-                        val phrase = lines.firstOrNull().orEmpty()
-                        detectWakeWord(phrase)
+                        val phrase = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                        val pending = pendingAssistant
+                        if (pending != null) {
+                            pendingAssistant = null
+                            launchAssistant(pending, phrase)
+                        } else {
+                            detectWakeWord(phrase)
+                        }
                         restartSoon(350)
                     }
                     override fun onPartialResults(partialResults: android.os.Bundle?) {
@@ -116,7 +122,11 @@ class WakeWordService : Service() {
     }
 
     private fun restartSoon(delay: Long) {
-        handler.postDelayed({ if (getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE).getBoolean("background_wake_enabled", false)) startListening() else stopSelf() }, delay)
+        handler.postDelayed({
+            val prefs = getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("background_wake_enabled", false) && !prefs.getBoolean("wake_command_active", false)) startListening()
+            else if (!prefs.getBoolean("background_wake_enabled", false)) stopSelf()
+        }, delay)
     }
 
     private fun detectWakeWord(raw: String) {
@@ -127,27 +137,42 @@ class WakeWordService : Service() {
             else -> return
         }
         val now = System.currentTimeMillis()
-        if (now - lastWakeAt < 4500) return
+        if (now - lastWakeAt < 4500 || pendingAssistant != null) return
         lastWakeAt = now
-        val cleaned = phrase
+        pendingAssistant = assistant
+        showPopup(assistant, null)
+        updateNotification("$assistant is listening", "Speak now — no tapping needed")
+    }
+
+    private fun launchAssistant(assistant: String, raw: String) {
+        val cleaned = raw.lowercase(Locale.ROOT)
             .replace(Regex("\\bhey\\s+jarvis\\b|\\bjarvis\\b|\\bhey\\s+ultron\\b|\\bultron\\b", RegexOption.IGNORE_CASE), "")
             .trim(' ', ',', '.', '?', '!', ':', ';')
+        getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE).edit()
+            .putBoolean("wake_command_active", true).apply()
+        try { recognizer?.cancel() } catch (_: Exception) {}
         val open = Intent(this, MainActivity::class.java).apply {
             putExtra(EXTRA_ASSISTANT, assistant)
             putExtra(EXTRA_WAKE_TEXT, cleaned)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         showPopup(assistant, open)
-        val nm = getSystemService(NotificationManager::class.java)
-        val openIntent = PendingIntent.getActivity(this, 2, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, channelId) else @Suppress("DEPRECATION") Notification.Builder(this)
-        nm.notify(41, notification.setContentTitle("$assistant is awake")
-            .setContentText("Tap to open and talk. Listening remains active.")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentIntent(openIntent).setOngoing(true).build())
+        startActivity(open)
+        updateNotification("$assistant activated", "Listening for your request")
+        handler.postDelayed({
+            val prefs = getSharedPreferences("jarvis_memory", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("wake_command_active", false).apply()
+            if (prefs.getBoolean("background_wake_enabled", false)) startListening()
+        }, 20000)
     }
 
-    private fun showPopup(assistant: String, openIntent: Intent) {
+    private fun updateNotification(title: String, message: String) {
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, channelId) else @Suppress("DEPRECATION") Notification.Builder(this)
+        getSystemService(NotificationManager::class.java).notify(41, builder.setContentTitle(title)
+            .setContentText(message).setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true).build())
+    }
+
+    private fun showPopup(assistant: String, openIntent: Intent?) {
         if (!Settings.canDrawOverlays(this)) {
             handler.post { Toast.makeText(this, "Wake word detected: $assistant. Allow “Display over other apps” for the popup.", Toast.LENGTH_LONG).show() }
             return
@@ -155,7 +180,7 @@ class WakeWordService : Service() {
         handler.post {
             removePopup()
             val bubble = TextView(this).apply {
-                text = "  $assistant is awake  ·  Tap to talk  "
+                text = "  $assistant listening · Speak now  "
                 textSize = 15f
                 setTextColor(Color.WHITE)
                 setPadding(22, 18, 22, 18)
@@ -165,7 +190,7 @@ class WakeWordService : Service() {
                     setStroke(2, if (assistant == "Jarvis") Color.rgb(75, 190, 255) else Color.rgb(190, 80, 255))
                 }
                 elevation = 12f
-                setOnClickListener { startActivity(openIntent); removePopup() }
+                setOnClickListener { if (openIntent != null) { startActivity(openIntent); removePopup() } }
             }
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
