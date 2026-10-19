@@ -269,9 +269,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val spoken = intent.getStringExtra(WakeWordService.EXTRA_WAKE_TEXT).orEmpty()
         intent.removeExtra(WakeWordService.EXTRA_ASSISTANT)
         intent.removeExtra(WakeWordService.EXTRA_WAKE_TEXT)
+        if (!handsFreeEnabled) {
+            handsFreeEnabled = true
+            prefs.edit().putBoolean("hands_free_enabled", true).apply()
+            if (::handsFreeButton.isInitialized) handsFreeButton.text = "HANDS-FREE MODE: ON - TAP TO STOP"
+        }
         if (spoken.isNotBlank()) handleMessage(spoken)
-        else if (handsFreeEnabled) scheduleNextListen(300)
-        else status.text = "$assistant is ready. Tap the core or speak to continue."
+        else {
+            status.text = "$assistant is listening. Speak now."
+            scheduleNextListen(300)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
