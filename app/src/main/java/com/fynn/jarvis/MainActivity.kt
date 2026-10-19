@@ -236,20 +236,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val localModel = field("Gemini model (recommended: gemini-3.8-flash)", prefs.getString("local_model", "gemini-3.8-flash") ?: "gemini-3.8-flash")
-        val geminiKey = field("Gemini API key (required)", prefs.getString("gemini_api_key", "") ?: "", true)
+        val localModel = field("Groq model (recommended: llama-3.3-70b-versatile)", prefs.getString("local_model", "llama-3.3-70b-versatile") ?: "llama-3.3-70b-versatile")
+        val groqKey = field("Groq API key (required)", prefs.getString("groq_api_key", "") ?: "", true)
         val fishKey = field("Fish Audio API key (optional)", prefs.getString("fish_api_key", "") ?: "", true)
         val jarvisVoice = field("Jarvis Fish Audio voice/model ID", prefs.getString("fish_voice_id", "612b878b113047d9a770c069c8b4fdfe") ?: "612b878b113047d9a770c069c8b4fdfe")
         val ultronVoice = field("Ultron Fish Audio voice/model ID", prefs.getString("ultron_voice_id", "23866d1d2134461cbcefe95d1bd8bfcf") ?: "23866d1d2134461cbcefe95d1bd8bfcf")
         val help = TextView(this).apply {
-            text = "Jarvis now uses Google Gemini. Recommended model: gemini-3.8-flash. Enter your Gemini API key below. API usage may be subject to Google AI Studio limits or billing. Fish Audio is optional for voice output."
+            text = "Jarvis now uses Groq. Recommended model: llama-3.3-70b-versatile. Enter your Groq API key below. Free usage has rate limits; it is not unlimited. Fish Audio is optional for voice output."
             textSize = 13f
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(8))
         }
         panel.addView(help, matchWrap())
         panel.addView(localModel, matchWrap())
-        panel.addView(geminiKey, matchWrap())
+        panel.addView(groqKey, matchWrap())
         panel.addView(fishKey, matchWrap())
         panel.addView(jarvisVoice, matchWrap())
         panel.addView(ultronVoice, matchWrap())
@@ -267,10 +267,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     status.text = "Settings not saved. Enter a model name and both voice IDs."
                     return@setPositiveButton
                 }
-                prefs.edit().putString("local_model", model).putString("gemini_api_key", geminiKey.text.toString().trim())
+                prefs.edit().putString("local_model", model).putString("groq_api_key", groqKey.text.toString().trim())
                     .putString("fish_api_key", fKey).putString("fish_voice_id", jVoice)
                     .putString("ultron_voice_id", uVoice).apply()
-                status.text = "Gemini settings saved."
+                status.text = "Groq settings saved."
             }
             .show()
     }
@@ -568,20 +568,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "$speaker is thinking..."
         thread {
             try {
-                val model = prefs.getString("local_model", "gemini-3.8-flash")?.trim().orEmpty().ifBlank { "gemini-3.8-flash" }
-                val geminiKey = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
-                if (geminiKey.isBlank()) {
-                    throw IllegalStateException("To use Gemini, open Assistant Settings, enter your Gemini API key, and save settings.")
+                val model = prefs.getString("local_model", "llama-3.3-70b-versatile")?.trim().orEmpty().ifBlank { "llama-3.3-70b-versatile" }
+                val groqKey = prefs.getString("groq_api_key", "")?.trim().orEmpty()
+                if (groqKey.isBlank()) {
+                    throw IllegalStateException("To use Groq, open Assistant Settings, enter your Groq API key, and save settings.")
                 }
-                val safeModel = model.removePrefix("models/").ifBlank { "gemini-3.8-flash" }
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$safeModel:generateContent?key=$geminiKey")
+                val safeModel = model.ifBlank { "llama-3.3-70b-versatile" }
+                val url = URL("https://api.groq.com/openai/v1/chat/completions")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 5000
                     readTimeout = 60000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
-                    
+                    setRequestProperty("Authorization", "Bearer $groqKey")
                 }
                 val facts = (prefs.getString("facts", "") ?: "").takeLast(900)
                 val fullConversationMemory = readRecentConversationLog(6000)
@@ -639,24 +639,11 @@ $webContext"""
                     }
                 }
                 chatMessages.put(JSONObject().put("role", "user").put("content", cleanMessage))
-                val geminiContents = JSONArray()
-                var systemInstruction = systemPrompt
-                for (i in 0 until chatMessages.length()) {
-                    val item = chatMessages.getJSONObject(i)
-                    val role = item.optString("role")
-                    val content = item.optString("content")
-                    if (role == "system") {
-                        systemInstruction = content
-                    } else {
-                        geminiContents.put(JSONObject()
-                            .put("role", if (role == "assistant") "model" else "user")
-                            .put("parts", JSONArray().put(JSONObject().put("text", content))))
-                    }
-                }
                 val body = JSONObject()
-                    .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction))))
-                    .put("contents", geminiContents)
-                    .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 512))
+                    .put("model", safeModel)
+                    .put("messages", chatMessages)
+                    .put("temperature", 0.7)
+                    .put("max_tokens", 512)
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 val responseText = (if (code in 200..299) connection.inputStream else connection.errorStream)
@@ -664,13 +651,11 @@ $webContext"""
                 connection.disconnect()
                 if (code !in 200..299) {
                     val details = try { JSONObject(responseText).optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
-                    throw IllegalStateException("Google Gemini returned HTTP $code. " + details.ifBlank { "Check your Gemini API key, model name, and Google AI Studio quota/billing." })
+                    throw IllegalStateException("Groq returned HTTP $code. " + details.ifBlank { "Check your Groq API key, model name, and rate limits." })
                 }
                 val json = JSONObject(responseText)
-                val candidates = json.optJSONArray("candidates")
-                val rawReply = candidates?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.let { parts ->
-                    (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.optString("text")?.takeIf { text -> text.isNotBlank() } }.joinToString("\n")
-                }.orEmpty().ifBlank { throw IllegalStateException("Gemini returned no text. Try again or check your API quota.") }
+                val rawReply = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim().orEmpty()
+                    .ifBlank { throw IllegalStateException("Groq returned no text. Try again or check your API rate limits.") }
                 val reply = removeImpersonatedUserLines(rawReply)
                 runOnUiThread {
                     val updatedHistory = (history + "\nUser: " + cleanMessage + "\n" + speaker + ": " + reply).takeLast(6000)
@@ -682,7 +667,7 @@ $webContext"""
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    val reply = "I couldn't reach Google Gemini. Check your internet connection, Gemini API key, model name, and API quota. Details: ${e.message ?: "connection failed"}"
+                    val reply = "I couldn't reach Groq. Check your internet connection, Groq API key, model name, and rate limits. Details: ${e.message ?: "connection failed"}"
                     showReply(message, reply, speaker)
                 }
             }
