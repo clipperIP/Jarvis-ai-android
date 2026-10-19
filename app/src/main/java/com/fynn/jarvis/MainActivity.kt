@@ -739,7 +739,14 @@ $webContext"""
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 connection.disconnect()
                 if (code !in 200..299) {
-                    val details = try { JSONObject(responseText).optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
+                    val details = try {
+                        val errorValue = JSONObject(responseText).opt("error")
+                        when (errorValue) {
+                            is String -> errorValue
+                            is JSONObject -> errorValue.optString("message").ifBlank { errorValue.toString() }
+                            else -> responseText.take(350)
+                        }
+                    } catch (_: Exception) { responseText.take(350) }
                     throw IllegalStateException("$providerName returned HTTP $code. " + details.ifBlank { if (providerName == "ollama") "Check that Ollama is running, the server URL is reachable, and the model is installed." else "Check your Groq API key, model name, and rate limits." })
                 }
                 val json = JSONObject(responseText)
